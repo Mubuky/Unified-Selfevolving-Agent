@@ -13,8 +13,19 @@ from utils import get_env_name_from_gamefile
 idxs = list(range(7405))
 random.Random(233).shuffle(idxs)
 
+def get_data_range(cfg, mode='train'):
+    """Get data range based on mode and configuration."""
+    if hasattr(cfg.benchmark, 'data_split') and cfg.benchmark.data_split:
+        if mode == 'eval':
+            return cfg.benchmark.data_split.eval_range
+        else:  # mode == 'train' or default
+            return cfg.benchmark.data_split.train_range
+    else:
+        # Fallback to original logic for backwards compatibility
+        return None
+
 INIT_TASKS_FN = dict(
-    hotpotqa=lambda cfg: (lambda data: [
+    hotpotqa=lambda cfg, mode='train': (lambda data: [
         {
         'task': f'{cfg.benchmark.task_prefix}{row["question"]}',
         'env_kwargs': {
@@ -24,14 +35,14 @@ INIT_TASKS_FN = dict(
         'env_name': 'hotpotqa',
     } for row in data])(json.load(open(cfg.benchmark.task_file, "r"))),
     # # 100 tasks for fever
-    # fever=lambda cfg: [{
+    # fever=lambda cfg, mode='train': [{
     #     'task': cfg.benchmark.task_prefix + FeverEnv(idx).reset().replace('Claim: ', ''),
     #     'env_kwargs': {
     #         'idx': idx,
     #     },
     #     'env_name': 'fever',
     # } for idx in idxs[:100]],
-    alfworld=lambda cfg: (lambda all_tasks: [
+    alfworld=lambda cfg, mode='train': (lambda all_tasks, data_range: [
         {
         'task': f'{cfg.benchmark.task_prefix}{row["goal"]}',
         'env_kwargs': {
@@ -39,11 +50,13 @@ INIT_TASKS_FN = dict(
             "gamefile": row["gamefile"],
         },
         'env_name': get_env_name_from_gamefile(row['gamefile'])
-        } for row in (all_tasks[:cfg.benchmark.dataset.num_train_games] 
-                     if cfg.benchmark.dataset.num_train_games > 0 
-                     else all_tasks)
-    ])(json.load(open(cfg.benchmark.task_file, "r"))),
-    # webshop=lambda cfg: [
+        } for row in (all_tasks[data_range[0]:data_range[1]]
+                     if data_range is not None
+                     else (all_tasks[:cfg.benchmark.dataset.num_train_games]
+                          if cfg.benchmark.dataset.num_train_games > 0
+                          else all_tasks))
+    ])(json.load(open(cfg.benchmark.task_file, "r")), get_data_range(cfg, mode)),
+    # webshop=lambda cfg, mode='train': [
     #     {
     #     'task': f'{cfg.benchmark.task_prefix}{row["task"]}',
     #     'env_kwargs': {
