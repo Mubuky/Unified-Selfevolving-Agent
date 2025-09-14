@@ -9,80 +9,39 @@ from .alfworld.alfworld import AlfworldEnv
 # from .webshop.webshop import WebshopEnv
 from utils import get_env_name_from_gamefile
 
+# Import the new dataset classes
+from datasets import ExpelDataset
+
 # Taken from ReAct Github
 idxs = list(range(7405))
 random.Random(233).shuffle(idxs)
 
-def get_data_range(cfg, mode='train'):
-    """Get data range based on mode and configuration."""
-    if hasattr(cfg.benchmark, 'data_split') and cfg.benchmark.data_split:
-        if mode == 'eval':
-            data_range = cfg.benchmark.data_split.eval_range
-        else:  # mode == 'train' or default
-            data_range = cfg.benchmark.data_split.train_range
-        print(f"[DEBUG] Using data_split config for {mode} mode: {data_range}")
-        return data_range
-    else:
-        # Fallback to original logic for backwards compatibility
-        print(f"[DEBUG] No data_split config found for {mode} mode, using fallback")
-        return None
+def _create_dataset_instance(cfg):
+    """Create and cache ExpelDataset instance."""
+    if not hasattr(_create_dataset_instance, 'cache'):
+        _create_dataset_instance.cache = {}
 
-def _load_alfworld_tasks(cfg, mode='train'):
-    """Load ALFWorld tasks with data range filtering."""
-    all_tasks = json.load(open(cfg.benchmark.task_file, "r"))
-    data_range = get_data_range(cfg, mode)
+    # Use a simple key for caching (benchmark name and task file)
+    cache_key = f"{cfg.benchmark.name}:{cfg.benchmark.task_file}"
 
-    if data_range is not None:
-        selected_rows = all_tasks[data_range[0]:data_range[1]]
-    else:
-        # Fallback to original logic
-        if cfg.benchmark.dataset.num_train_games > 0:
-            selected_rows = all_tasks[:cfg.benchmark.dataset.num_train_games]
-        else:
-            selected_rows = all_tasks
+    if cache_key not in _create_dataset_instance.cache:
+        # Enable debug mode if needed
+        if not hasattr(cfg, 'debug'):
+            cfg.debug = True  # Enable debug output for dataset
+        _create_dataset_instance.cache[cache_key] = ExpelDataset(cfg)
 
-    selected_tasks = [
-        {
-            'task': f'{cfg.benchmark.task_prefix}{row["goal"]}',
-            'env_kwargs': {
-                'config': cfg.benchmark,
-                "gamefile": row["gamefile"],
-            },
-            'env_name': get_env_name_from_gamefile(row['gamefile'])
-        } for row in selected_rows
-    ]
+    return _create_dataset_instance.cache[cache_key]
 
-    print(f"[DEBUG] ALFWorld {mode} mode: Total tasks loaded: {len(all_tasks)}, Selected range: {data_range}, Final task count: {len(selected_tasks)}")
-    return selected_tasks
+def _load_tasks_with_dataset(cfg, mode='train'):
+    """Load tasks using ExpelDataset class."""
+    dataset = _create_dataset_instance(cfg)
+    return dataset.load_tasks(mode)
 
 INIT_TASKS_FN = dict(
-    hotpotqa=lambda cfg, mode='train': (lambda data: [
-        {
-        'task': f'{cfg.benchmark.task_prefix}{row["question"]}',
-        'env_kwargs': {
-            'question': row['question'],
-            'key': row['answer'],
-        },
-        'env_name': 'hotpotqa',
-    } for row in data])(json.load(open(cfg.benchmark.task_file, "r"))),
-    # # 100 tasks for fever
-    # fever=lambda cfg, mode='train': [{
-    #     'task': cfg.benchmark.task_prefix + FeverEnv(idx).reset().replace('Claim: ', ''),
-    #     'env_kwargs': {
-    #         'idx': idx,
-    #     },
-    #     'env_name': 'fever',
-    # } for idx in idxs[:100]],
-    alfworld=lambda cfg, mode='train': _load_alfworld_tasks(cfg, mode),
-    # webshop=lambda cfg, mode='train': [
-    #     {
-    #     'task': f'{cfg.benchmark.task_prefix}{row["task"]}',
-    #     'env_kwargs': {
-    #         'session_idx': row["session_idx"],
-    #     },
-    #     'env_name': 'webshop'
-    #     } for row in json.load(open(cfg.benchmark.task_file, "r"))
-    # ],
+    hotpotqa=_load_tasks_with_dataset,
+    fever=_load_tasks_with_dataset,
+    alfworld=_load_tasks_with_dataset,
+    webshop=_load_tasks_with_dataset,
 )
 
 # ENVS = dict(hotpotqa=QAEnv, fever=FeverEnv, alfworld=AlfworldEnv, webshop=WebshopEnv)

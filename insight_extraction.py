@@ -86,7 +86,7 @@ def main(cfg : DictConfig) -> None:
         name=cfg.ai_name,
         system_instruction=SYSTEM_INSTRUCTION[cfg.benchmark.name],
         human_instruction=HUMAN_INSTRUCTION[cfg.benchmark.name],
-        tasks=INIT_TASKS_FN[cfg.benchmark.name](cfg),
+        tasks=INIT_TASKS_FN[cfg.benchmark.name](cfg, mode='train'),
         fewshots=FEWSHOTS[cfg.benchmark.name],
         system_prompt=system_message_prompt,
         env=ENVS[cfg.benchmark.name],
@@ -132,7 +132,7 @@ def main(cfg : DictConfig) -> None:
     react_agent.load_checkpoint(dicts[-1], no_load_list=no_load_list)
 
     random.seed(cfg.seed)
-    num_training_tasks = len(INIT_TASKS_FN[cfg.benchmark.name](cfg))
+    num_training_tasks = len(INIT_TASKS_FN[cfg.benchmark.name](cfg, mode='train'))
     if not cfg.resume:
         resume = False
     else:
