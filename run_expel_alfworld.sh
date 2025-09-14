@@ -20,6 +20,9 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+export OPENAI_API_KEY=${OPENAI_API_KEY:-"sk-WPZxkYp48tG3OMZcm5h2HwTrGicWCem0BkEZRCY6DaLDksXW"}
+export BASE_URL=${BASE_URL:-"https://api.chatanywhere.tech/v1"}
+
 # Function to print colored output
 print_status() {
     echo -e "${BLUE}[INFO]${NC} $1"

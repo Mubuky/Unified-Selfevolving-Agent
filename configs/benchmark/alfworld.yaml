@@ -1,6 +1,6 @@
 name: alfworld
 task_prefix: ""
-task_file: data/alfworld/alfworld_train_tasks_full.json
+task_file: data/alfworld/alfworld_tasks_suffix.json
 max_steps: 20
 num_fewshots: 2
 eval_configs:
@@ -8,9 +8,10 @@ eval_configs:
   k_folds_seed: 42
 
 data_split:
-  train_range: [0, 5]     # Training data index range (0-4)
-  eval_range: [5, 8]     # Evaluation data index range (5-7)
-split: train
+  train_range: [0, 5]      # Training data index range (0-4)
+  eval_range: [5, 8]       # Evaluation data index range (5-7)
+
+split: eval_out_of_distribution
 ai_name: alfred
 
 dataset:
