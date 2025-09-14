@@ -36,6 +36,7 @@ from memory import (
 )
 from models import LLM_CLS
 from utils import save_trajectories_log, load_trajectories_log, shuffled_chunks, get_split_eval_idx_list
+from storage import ExpelStorage
 from agent.reflect import Count
 
 from dotenv import load_dotenv
@@ -53,6 +54,9 @@ def main(cfg : DictConfig) -> None:
     LOG_PATH = Path('/'.join([cfg.log_dir, cfg.benchmark.name, cfg.agent_type]))
     SAVE_PATH = LOG_PATH / 'extracted_insights'
     SAVE_PATH.mkdir(exist_ok=True)
+
+    # Initialize storage system
+    storage = ExpelStorage(cfg)
 
     # Enhanced auto_resume support for insight extraction
     auto_resume = getattr(cfg, 'auto_resume', False)
@@ -72,12 +76,13 @@ def main(cfg : DictConfig) -> None:
     if cfg.resume and cfg.resume_fold < 0:
         print('Specify a fold to resume when resuming a run! (resume_fold=X)')
         exit(1)
-    out = load_trajectories_log(
-            SAVE_PATH / f"fold_{cfg.resume_fold}" if cfg.resume_fold > -1 else LOG_PATH, 
-            run_name=cfg.load_run_name,
-            load_log=cfg.resume,
-            load_true_log=False
-        )
+    # Load training phase 1 data for insights extraction
+    if cfg.resume and cfg.resume_fold > -1:
+        # If resuming from a specific fold, load insights checkpoint
+        out = storage.load_insights(cfg.load_run_name)
+    else:
+        # Normal case: load experience data
+        out = storage.load_experience(cfg.load_run_name)
     dicts = out['dicts']
     log = out['log'] if cfg.resume else ''
 
@@ -185,12 +190,13 @@ def main(cfg : DictConfig) -> None:
     if cfg.folded:
         save_dict['eval_idx_list'] = eval_idx_list
     dicts.append(save_dict)
-    save_trajectories_log(
-        path=SAVE_PATH, 
-        log=log, 
-        dicts=dicts,
-        run_name=f'{cfg.run_name}',
-        save_true_log=False
+
+    # Save insights extraction results using storage system
+    storage.save_insights(
+        run_name=cfg.run_name,
+        agent_dict=save_dict,
+        log=log,
+        original_run_name=cfg.load_run_name  # Reference to original training run
     )
 
 if __name__ == "__main__":

@@ -37,7 +37,8 @@ from memory import (
     RETRIEVERS,
 )
 from models import LLM_CLS
-from utils import get_fewshot_max_tokens, load_trajectories_log, save_trajectories_log, split_logs_by_task, plot_trial_stats, alfworld_results_per_env_name_log, get_webshop_mean_score
+from utils import get_fewshot_max_tokens, split_logs_by_task, plot_trial_stats, alfworld_results_per_env_name_log, get_webshop_mean_score
+from storage import ExpelStorage
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="eval")
@@ -52,6 +53,9 @@ def main(cfg : DictConfig) -> None:
     SAVE_PATH = LOG_PATH / 'eval'
     SAVE_PATH.mkdir(exist_ok=True)
 
+    # Initialize storage system
+    storage = ExpelStorage(cfg)
+
     print(f"{SAVE_PATH}/{cfg.run_name}.pkl")
     
     # Overwriting confirmation
@@ -64,11 +68,12 @@ def main(cfg : DictConfig) -> None:
                 break
 
     # Load trajectory checkpoint
-    out = load_trajectories_log(
-        SAVE_PATH if cfg.resume else LOG_PATH,
-        run_name=cfg.load_run_name,
-        load_log=cfg.resume,
-        load_true_log=cfg.resume)
+    if cfg.resume:
+        # Resume from evaluation checkpoint
+        out = storage.load_evaluation_checkpoint(cfg.load_run_name)
+    else:
+        # Load insights from training phase 2 for fresh evaluation
+        out = storage.load_insights(cfg.load_run_name)
     dicts = out['dicts']
     log = out['log'] if cfg.resume else f'### EVALUATION MODE ###\n{str(cfg)}\n'
     true_log = out['true_log'] if cfg.resume else f'### EVALUATION MODE ###\n{str(cfg)}\n'
@@ -171,12 +176,11 @@ def main(cfg : DictConfig) -> None:
             'starting_idx': eval_idx + 1,  # Next task to start from if resuming
         })
         dicts.append(eval_dict)
-        save_trajectories_log(
-            path=SAVE_PATH,
+        storage.save_evaluation_results(
+            run_name=cfg.run_name,
+            agent_dict=eval_dict,
             log=log,
-            dicts=dicts,
-            true_log=true_log,
-            run_name=f'{cfg.run_name}'
+            true_log=true_log
         )
 
     # logging to files
@@ -198,12 +202,11 @@ def main(cfg : DictConfig) -> None:
     true_log += f'\n\n{results}\n########################################'
     print(results)
 
-    save_trajectories_log(
-        path=SAVE_PATH, 
-        log=log, 
-        dicts=dicts,
-        true_log=true_log,
-        run_name=f'{cfg.run_name}'
+    storage.save_evaluation_results(
+        run_name=cfg.run_name,
+        agent_dict=dicts[-1] if dicts else {},
+        log=log,
+        true_log=true_log
     )
 
 if __name__ == "__main__":

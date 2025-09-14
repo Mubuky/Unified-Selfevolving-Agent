@@ -38,6 +38,7 @@ from memory import (
 )
 from models import LLM_CLS
 from utils import save_trajectories_log, load_trajectories_log, plot_trial_stats, split_logs_by_task, alfworld_results_per_env_name, get_webshop_mean_scores, get_fewshot_max_tokens
+from storage import ExpelStorage
 from agent.reflect import Count
 
 @hydra.main(version_base=None, config_path="configs", config_name="train")
@@ -51,22 +52,21 @@ def main(cfg : DictConfig) -> None:
     LOG_PATH = Path('/'.join([cfg.log_dir, cfg.benchmark.name, cfg.agent_type]))
     LOG_PATH.mkdir(parents=True, exist_ok=True)
 
+    # Initialize storage system
+    storage = ExpelStorage(cfg)
+
     # Load trajectory checkpoint, init as empty if not exist
-    checkpoint_path = f"{LOG_PATH}/{cfg.run_name}.pkl"
-    checkpoint_exists = os.path.exists(checkpoint_path)
-    
+    checkpoint_exists = storage.exists(cfg.run_name, 'train')
+
     # Enhanced auto_resume support
     auto_resume = getattr(cfg, 'auto_resume', False)
-    
+
     if cfg.resume:
         if checkpoint_exists:
-            print(f"Loading checkpoint from {checkpoint_path}")
-            out = load_trajectories_log(
-                LOG_PATH,
-                run_name=cfg.run_name,
-                load_true_log=True)
+            print(f"Loading checkpoint from {storage.get_run_path(cfg.run_name, 'train')}")
+            out = storage.load_training_phase1(cfg.run_name)
         else:
-            print(f"Resume requested but no checkpoint found at {checkpoint_path}, starting fresh")
+            print(f"Resume requested but no checkpoint found, starting fresh")
             out = {'log': '', 'dicts': [], 'true_log': f'{str(cfg)}'}
     else:
         # Overwriting confirmation (skip if auto_resume is enabled)
@@ -78,7 +78,7 @@ def main(cfg : DictConfig) -> None:
                 elif res == 'y':
                     break
         elif checkpoint_exists and auto_resume:
-            print(f"Auto-resume mode: Existing checkpoint will be overwritten at {checkpoint_path}")
+            print(f"Auto-resume mode: Existing checkpoint will be overwritten")
         out = {'log': '', 'dicts': [], 'true_log': f'{str(cfg)}'}
     log, dicts, true_log = out['log'], out['dicts'], out['true_log']
 
@@ -176,10 +176,13 @@ You are using the following language model: {react_agent.llm.model_name}
         progress_bar.update(1)
         
         dicts.append({k: deepcopy(v) for k, v in react_agent.__dict__.items() if type(v) in [list, set, str, bool, int, dict, Count] and k not in ['openai_api_key', 'llm']}) # not saving complicated objects
-        
-        save_trajectories_log(
-            LOG_PATH, log, dicts, true_log,
-            run_name=cfg.run_name
+
+        # Save experience checkpoint using storage system
+        storage.save_experience(
+            run_name=cfg.run_name,
+            agent_dict=dicts[-1],  # Save the latest agent state
+            log=log,
+            true_log=true_log
         )
         #############################################
     
@@ -205,9 +208,12 @@ You are using the following language model: {react_agent.llm.model_name}
     true_log += f'\n\n{results}\n#######################################'
     print(results)
 
-    save_trajectories_log(
-        LOG_PATH, log, dicts, true_log,
-        run_name=cfg.run_name
+    # Save final experience results using storage system
+    storage.save_experience(
+        run_name=cfg.run_name,
+        agent_dict=dicts[-1] if dicts else {},  # Save the final agent state
+        log=log,
+        true_log=true_log
     )
 
     log, dicts, true_log = '', [], ''
