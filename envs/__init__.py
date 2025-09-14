@@ -25,9 +25,6 @@ def _create_dataset_instance(cfg):
     cache_key = f"{cfg.benchmark.name}:{cfg.benchmark.task_file}"
 
     if cache_key not in _create_dataset_instance.cache:
-        # Enable debug mode if needed
-        if not hasattr(cfg, 'debug'):
-            cfg.debug = True  # Enable debug output for dataset
         _create_dataset_instance.cache[cache_key] = ExpelDataset(cfg)
 
     return _create_dataset_instance.cache[cache_key]

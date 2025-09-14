@@ -28,7 +28,8 @@ class BaseDataset(ABC):
         self.benchmark_name = cfg.benchmark.name
         self.task_file = cfg.benchmark.task_file
         self.task_prefix = cfg.benchmark.task_prefix
-        self._debug_mode = getattr(cfg, 'debug', False)
+        # Always enable debug mode for now since it's helpful for data range validation
+        self._debug_mode = True
 
     def get_data_range(self, mode: str = 'train') -> Optional[Tuple[int, int]]:
         """
