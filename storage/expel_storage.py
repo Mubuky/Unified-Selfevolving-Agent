@@ -146,14 +146,22 @@ class ExpelStorage(BaseStorage):
 
         Returns the agent state with extracted insights and rules.
         """
+        # Handle case where run_name already contains extracted_insights/ prefix
+        if run_name.startswith('extracted_insights/'):
+            actual_run_name = run_name[len('extracted_insights/'):]
+            load_path = str(self.insights_path)
+        else:
+            actual_run_name = run_name
+            load_path = str(self.insights_path)
+
         self._log_operation(
             "LOAD_INSIGHTS",
-            f"run_name={run_name}, path={self.insights_path}"
+            f"run_name={run_name} -> actual_run_name={actual_run_name}, path={load_path}"
         )
 
         return load_trajectories_log(
-            path=str(self.insights_path),
-            run_name=run_name,
+            path=load_path,
+            run_name=actual_run_name,
             load_log=True,
             load_dict=True,
             load_true_log=False
@@ -198,14 +206,22 @@ class ExpelStorage(BaseStorage):
 
         Returns the evaluation state for resuming interrupted evaluation.
         """
+        # Handle case where run_name already contains eval/ prefix
+        if run_name.startswith('eval/'):
+            actual_run_name = run_name[len('eval/'):]
+            load_path = str(self.eval_path)
+        else:
+            actual_run_name = run_name
+            load_path = str(self.eval_path)
+
         self._log_operation(
             "LOAD_EVALUATION_CHECKPOINT",
-            f"run_name={run_name}, path={self.eval_path}"
+            f"run_name={run_name} -> actual_run_name={actual_run_name}, path={load_path}"
         )
 
         return load_trajectories_log(
-            path=str(self.eval_path),
-            run_name=run_name,
+            path=load_path,
+            run_name=actual_run_name,
             load_log=True,
             load_dict=True,
             load_true_log=True
