@@ -171,9 +171,16 @@ You are using the following language model: {react_agent.llm.model_name}
         log += prefix + react_agent.log_history() + '\n\n'
         true_log += prefix + react_agent.log_history(include_all=True) + '\n\n'
 
-        # next task
-        react_agent.next_task()
-        progress_bar.update(1)
+        # next task - only update progress bar if we actually moved to next task
+        if cfg.agent_type in ['reflection', 'expel']:
+            # For reflection-based agents, only update progress when truly moving to next task
+            task_incremented = react_agent.next_task()
+            if task_incremented:
+                progress_bar.update(1)
+        else:
+            # For basic react agent, always update progress (no reflection mechanism)
+            react_agent.next_task()
+            progress_bar.update(1)
         
         dicts.append({k: deepcopy(v) for k, v in react_agent.__dict__.items() if type(v) in [list, set, str, bool, int, dict, Count] and k not in ['openai_api_key', 'llm']}) # not saving complicated objects
 
