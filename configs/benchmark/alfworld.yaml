@@ -8,8 +8,8 @@ eval_configs:
   k_folds_seed: 42
 
 data_split:
-  train_range: [0, 10]     # Training data index range (0-9)
-  eval_range: [10, 13]     # Evaluation data index range (10-12)
+  train_range: [0, 5]     # Training data index range (0-4)
+  eval_range: [5, 8]     # Evaluation data index range (5-7)
 split: train
 ai_name: alfred
 
