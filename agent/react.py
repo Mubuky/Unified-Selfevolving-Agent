@@ -68,15 +68,8 @@ class ReactAgent(BaseAgent):
         # Update dynamic components first to initialize system_instruction
         self.update_dynamic_prompt_components()
 
-        # Initialize prompt constructor after system_instruction is set
-        self.constructor = ExpelConstructor(
-            benchmark_name=benchmark_name,
-            system_instruction=self.system_instruction,
-            human_instruction=self.human_instruction,
-            system_prompt=self.system_prompt,
-            ai_name=self.name,
-            human_instruction_kwargs=self.human_instruction_kwargs
-        )
+        # Constructor will be initialized in reset() after system_instruction is set
+        self.constructor = None
 
         # Now safe to reset and build prompt
         self.reset()
@@ -191,7 +184,7 @@ class ReactAgent(BaseAgent):
         self.insert_before_task_prompt()
 
         # Add task description
-        task_messages = self.constructor.build_task_prompt(self.remove_task_suffix(self.task))
+        task_messages = self.constructor.build_task_prompt(self.constructor.remove_task_suffix(self.task))
         self.prompt_history.extend(task_messages)
 
         # Insert after task
@@ -205,6 +198,18 @@ class ReactAgent(BaseAgent):
     def reset(self, *args, **kwargs) -> None:
         self.prompt_history = []
         self.update_dynamic_prompt_components(reset=True)
+
+        # Initialize constructor after system_instruction is set
+        if self.constructor is None:
+            self.constructor = ExpelConstructor(
+                benchmark_name=self.benchmark_name,
+                system_instruction=self.system_instruction,
+                human_instruction=self.human_instruction,
+                system_prompt=self.system_prompt,
+                ai_name=self.name,
+                human_instruction_kwargs=self.human_instruction_kwargs
+            )
+
         self.curr_step = 1
         self._build_agent_prompt()
 
@@ -265,7 +270,7 @@ class ReactAgent(BaseAgent):
         self.num_fewshots = len(self.fewshots)
 
         # Update constructor if it exists
-        if hasattr(self, 'constructor'):
+        if hasattr(self, 'constructor') and self.constructor is not None:
             self.constructor.system_instruction = self.system_instruction
             self.constructor.human_instruction_kwargs = self.human_instruction_kwargs
 

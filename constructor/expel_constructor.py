@@ -237,6 +237,66 @@ class ExpelConstructor(BaseConstructor):
                                 return fewshots_part
         return None
 
+    def remove_task_suffix(self, task: str) -> str:
+        """
+        Remove benchmark-specific task suffixes.
+
+        This method handles benchmark-specific task cleaning logic.
+        """
+        if self.benchmark_name == 'alfworld':
+            return task.split('___')[0]
+        return task
+
+    def build_complete_prompt_with_insertions(self,
+                                            fewshots: List[str],
+                                            task: str,
+                                            rules: Optional[str] = None,
+                                            before_task_content: Optional[List[ChatMessage]] = None,
+                                            after_task_content: Optional[List[ChatMessage]] = None,
+                                            is_training: bool = True,
+                                            no_rules: bool = False) -> List[ChatMessage]:
+        """
+        Build complete prompt with flexible insertion points.
+
+        This method extends build_complete_prompt to support arbitrary content insertion
+        before and after the task description.
+        """
+        prompt_history = []
+
+        # 1. Add system prompt
+        system_messages = self.build_system_prompt()
+        prompt_history.extend(system_messages)
+
+        # 2. Add few-shot examples
+        fewshot_messages = self.build_fewshot_prompt(fewshots)
+        prompt_history.extend(fewshot_messages)
+
+        # 3. Collapse messages
+        prompt_history = self.collapse_prompts(prompt_history)
+
+        # 4. Insert rules before task (evaluation phase only)
+        if not is_training and not no_rules and rules:
+            rules_messages = self.build_rules_prompt(rules)
+            prompt_history.extend(rules_messages)
+
+        # 5. Insert arbitrary content before task
+        if before_task_content:
+            prompt_history.extend(before_task_content)
+
+        # 6. Add task description
+        task_content = self.remove_task_suffix(task)
+        task_messages = self.build_task_prompt(task_content)
+        prompt_history.extend(task_messages)
+
+        # 7. Insert arbitrary content after task
+        if after_task_content:
+            prompt_history.extend(after_task_content)
+
+        # 8. Final collapse
+        prompt_history = self.collapse_prompts(prompt_history)
+
+        return prompt_history
+
     def build_incremental_prompt(self,
                                  base_prompt: List[ChatMessage],
                                  conversation_history: List[ChatMessage]) -> List[ChatMessage]:
