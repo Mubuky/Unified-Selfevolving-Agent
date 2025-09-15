@@ -27,22 +27,47 @@ OpenAI API key must be provided either:
 
 ## Core Commands
 
-### Training Phase 1: Experience Gathering
+### Unified Two-Phase Training (Recommended)
+Run both Training Phase 1 and Training Phase 2 sequentially with a single command:
 ```bash
-python train.py benchmark=<benchmark-name> run_name=<train-run-name> testing=false resume=false
+python train.py benchmark=<benchmark-name> run_name=<run-name> agent.llm=gpt-4 agent.max_num_rules=<num> agent.success_critique_num=<num> testing=false resume=false
 
 # Examples:
-python train.py benchmark=alfworld run_name=my_train_run testing=false resume=false
-python train.py benchmark=webshop run_name=my_train_run testing=false resume=false
-python train.py benchmark=hotpotqa run_name=my_train_run testing=false resume=false
+python train.py benchmark=alfworld run_name=my_experiment agent.llm=gpt-4 agent.max_num_rules=10 agent.success_critique_num=8 testing=false resume=false
+python train.py benchmark=webshop run_name=my_experiment agent.llm=gpt-4 agent.max_num_rules=10 agent.success_critique_num=8 testing=false resume=false
+python train.py benchmark=hotpotqa run_name=my_experiment agent.llm=gpt-4 agent.max_num_rules=10 agent.success_critique_num=8 testing=false resume=false
 ```
 
-### Training Phase 2: Insights Extraction
+### Individual Phase Training (Advanced)
+For fine-grained control, you can run phases separately:
+
+**Training Phase 1 Only:**
+```bash
+python train.py benchmark=<benchmark-name> run_name=<run-name> run_phase_1=true run_phase_2=false testing=false resume=false
+
+# Example:
+python train.py benchmark=alfworld run_name=my_train_run run_phase_1=true run_phase_2=false testing=false resume=false
+```
+
+**Training Phase 2 Only:**
+```bash
+python train.py benchmark=<benchmark-name> run_name=<run-name> run_phase_1=false run_phase_2=true agent.llm=gpt-4 agent.max_num_rules=<num> agent.success_critique_num=<num> testing=false resume=false
+
+# Example:
+python train.py benchmark=alfworld run_name=my_train_run run_phase_1=false run_phase_2=true agent.llm=gpt-4 agent.max_num_rules=10 agent.success_critique_num=8 testing=false resume=false
+```
+
+### Legacy Commands (Deprecated)
+The original separate scripts are still available but deprecated:
+
+**Training Phase 1: Experience Gathering**
+```bash
+python train.py benchmark=<benchmark-name> run_name=<train-run-name> testing=false resume=false
+```
+
+**Training Phase 2: Insights Extraction**
 ```bash
 python insight_extraction.py benchmark=<benchmark-name> load_run_name=<train-run-name> run_name=<insights-run-name> agent.llm=gpt-4 agent.max_num_rules=<num> agent.success_critique_num=<num> testing=false resume=false
-
-# Examples:
-python insight_extraction.py benchmark=alfworld load_run_name=my_train_run run_name=my_insights_run agent.llm=gpt-4 agent.max_num_rules=10 agent.success_critique_num=8 testing=false resume=false
 ```
 
 ### Evaluation
@@ -109,6 +134,35 @@ Add `testing=true` to any command to run without OpenAI API calls (for developme
 - Template system for consistent agent interactions
 - Reflection and critique prompt templates
 
+### Unified Training System
+ExpeL now features a unified two-phase training system that simplifies the experiential learning workflow:
+
+**Key Features**:
+- **Single Command Execution**: Both phases run sequentially with automatic data handoff
+- **Phase Control**: Individual phases can be enabled/disabled via `run_phase_1` and `run_phase_2` parameters
+- **Automatic Configuration**: Phase 2 configuration is automatically prepared from Phase 1 settings
+- **Seamless Data Transfer**: Experience data from Phase 1 is automatically loaded for Phase 2
+- **Progress Tracking**: Clear visual indicators for phase transitions and completion status
+- **Resume Support**: Can resume from either phase independently
+- **100% Backward Compatibility**: Original separate scripts remain available
+
+**Unified Training Command**:
+```bash
+python train.py benchmark=alfworld run_name=my_experiment agent.llm=gpt-4 agent.max_num_rules=10 agent.success_critique_num=8
+```
+
+**Phase Control Examples**:
+```bash
+# Run both phases (default)
+python train.py benchmark=alfworld run_name=test
+
+# Run only Phase 1
+python train.py benchmark=alfworld run_name=test run_phase_1=true run_phase_2=false
+
+# Run only Phase 2 (requires existing Phase 1 data)
+python train.py benchmark=alfworld run_name=test run_phase_1=false run_phase_2=true agent.llm=gpt-4 agent.max_num_rules=10
+```
+
 ### Key Data Flow
 1. **Training Phase 1 (Experience Gathering)**:
    - Agent interacts with environment using ExpelDataset for task loading
@@ -116,7 +170,8 @@ Add `testing=true` to any command to run without OpenAI API calls (for developme
    - Stores successful/failed trajectories in `succeeded_trial_history`/`failed_trial_history`
 
 2. **Training Phase 2 (Insight Extraction)**:
-   - ExpelStorage loads experiences via `load_experience()` method
+   - **Unified Mode**: Automatically loads Phase 1 data using the same `run_name`
+   - **Separate Mode**: ExpelStorage loads experiences via `load_experience()` method
    - ExpelManager analyzes collected experiences to extract actionable insights and rules
    - Uses success/failure trajectory comparison for critique generation
    - Applies rule parsing and updating logic with weighted prioritization
@@ -131,12 +186,18 @@ Add `testing=true` to any command to run without OpenAI API calls (for developme
 
 ### Configuration System
 Uses Hydra for configuration management:
-- `configs/train.yaml`: Training Phase 1 configuration
-- `configs/insight_extraction.yaml`: Training Phase 2 configuration
+- `configs/train.yaml`: Unified training configuration (supports both phases)
+- `configs/insight_extraction.yaml`: Legacy Training Phase 2 configuration (deprecated)
 - `configs/eval.yaml`: Evaluation phase configuration
 - `configs/benchmark/`: Environment-specific settings including data range configuration
   - `data_split.train_range`: Training data indices (e.g., [0, 10])
   - `data_split.eval_range`: Evaluation data indices (e.g., [10, 13])
+
+**Unified Training Configuration**:
+The new unified training system uses the `train.yaml` configuration and automatically adds Phase 2 parameters when needed:
+- `run_phase_1`: Enable/disable Training Phase 1 (default: true)
+- `run_phase_2`: Enable/disable Training Phase 2 (default: true)
+- Phase 2 parameters (agent.llm, agent.max_num_rules, etc.) are automatically applied when Phase 2 runs
 
 ### Modular Data Management
 **ExpelDataset handles task loading**:
