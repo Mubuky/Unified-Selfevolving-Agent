@@ -1,10 +1,9 @@
 #!/bin/bash
 
-# ExpeL ALFWorld Full Pipeline Script
+# ExpeL ALFWorld Full Pipeline Script (Unified Training Version)
 # This script runs the complete ExpeL pipeline:
-# 1. Training Phase 1: Experience Gathering
-# 2. Training Phase 2: Insights Extraction
-# 3. Evaluation
+# 1. Unified Two-Phase Training (Experience Gathering + Insights Extraction)
+# 2. Evaluation
 
 set -e  # Exit on any error
 
@@ -12,6 +11,8 @@ set -e  # Exit on any error
 RUN_NAME=${1:-"alfworld_run_$(date +%Y%m%d_%H%M%S)"}
 LLM_MODEL=${2:-"gpt-4o-mini"}
 TESTING=${3:-"false"}
+MAX_NUM_RULES=${4:-"10"}
+SUCCESS_CRITIQUE_NUM=${5:-"8"}
 
 # Colors for output
 RED='\033[0;31m'
@@ -55,11 +56,6 @@ check_dependencies() {
         exit 1
     fi
 
-    if [ ! -f "insight_extraction.py" ]; then
-        print_error "insight_extraction.py not found!"
-        exit 1
-    fi
-
     if [ ! -f "eval.py" ]; then
         print_error "eval.py not found!"
         exit 1
@@ -71,6 +67,7 @@ check_dependencies() {
     fi
 
     print_success "All dependencies found"
+    print_status "Using unified training system (train.py handles both phases)"
 }
 
 # Function to check if process completed successfully
@@ -85,50 +82,40 @@ check_success() {
 
 # Main execution
 main() {
-    print_header "ExpeL ALFWorld Full Pipeline"
+    print_header "ExpeL ALFWorld Full Pipeline (Unified Training)"
     echo "Run Name: $RUN_NAME"
     echo "LLM Model: $LLM_MODEL"
     echo "Testing Mode: $TESTING"
+    echo "Max Num Rules: $MAX_NUM_RULES"
+    echo "Success Critique Num: $SUCCESS_CRITIQUE_NUM"
     echo ""
 
     check_dependencies
 
-    # Phase 1: Experience Gathering (Training Phase 1)
-    print_header "PHASE 1: EXPERIENCE GATHERING"
-    print_status "Starting Training Phase 1..."
+    # Unified Two-Phase Training
+    print_header "UNIFIED TWO-PHASE TRAINING"
+    print_status "Starting unified training (Phase 1: Experience Gathering + Phase 2: Insights Extraction)..."
 
     python train.py \
         benchmark=alfworld \
         run_name="$RUN_NAME" \
         agent.llm="$LLM_MODEL" \
+        agent.max_num_rules="$MAX_NUM_RULES" \
+        agent.success_critique_num="$SUCCESS_CRITIQUE_NUM" \
         testing="$TESTING" \
-        resume=false
+        resume=false \
+        run_phase_1=true \
+        run_phase_2=true
 
-    check_success "Training Phase 1"
+    check_success "Unified Two-Phase Training"
 
-    # Phase 2: Insights Extraction (Training Phase 2)
-    print_header "PHASE 2: INSIGHTS EXTRACTION"
-    print_status "Starting Training Phase 2..."
-
-    python insight_extraction.py \
-        benchmark=alfworld \
-        load_run_name="$RUN_NAME" \
-        run_name="${RUN_NAME}_insights" \
-        agent.llm="gpt-4" \
-        agent.max_num_rules=10 \
-        agent.success_critique_num=8 \
-        testing="$TESTING" \
-        resume=false
-
-    check_success "Training Phase 2"
-
-    # Phase 3: Evaluation
-    print_header "PHASE 3: EVALUATION"
+    # Evaluation
+    print_header "EVALUATION"
     print_status "Starting Evaluation..."
 
     python eval.py \
         benchmark=alfworld \
-        load_run_name="extracted_insights/${RUN_NAME}_insights" \
+        load_run_name="extracted_insights/$RUN_NAME" \
         run_name="${RUN_NAME}_eval" \
         agent.fewshot_strategy=task_similarity \
         agent.retrieval_kwargs.max_fewshot_tokens=auto \
@@ -142,27 +129,51 @@ main() {
     print_success "All phases completed for run: $RUN_NAME"
     echo ""
     echo "Results can be found in:"
-    echo "  - Training Phase 1: logs/alfworld/expel/$RUN_NAME.pkl"
-    echo "  - Training Phase 2: logs/alfworld/expel/extracted_insights/${RUN_NAME}_insights.pkl"
+    echo "  - Training (Both Phases): logs/alfworld/expel/$RUN_NAME.pkl"
+    echo "  - Insights: logs/alfworld/expel/extracted_insights/$RUN_NAME.pkl"
     echo "  - Evaluation: logs/alfworld/expel/eval/${RUN_NAME}_eval.pkl"
     echo ""
     echo "To view logs, check the logs/alfworld/expel/ directory"
+    echo ""
+    print_success "🎉 ExpeL ALFWorld pipeline completed successfully with unified training!"
 }
 
 # Help function
 show_help() {
-    echo "Usage: $0 [RUN_NAME] [LLM_MODEL] [TESTING]"
+    echo "ExpeL ALFWorld Full Pipeline Script (Unified Training Version)"
+    echo "Usage: $0 [RUN_NAME] [LLM_MODEL] [TESTING] [MAX_NUM_RULES] [SUCCESS_CRITIQUE_NUM]"
     echo ""
     echo "Parameters:"
-    echo "  RUN_NAME    - Name for this experimental run (default: alfworld_run_TIMESTAMP)"
-    echo "  LLM_MODEL   - LLM model to use (default: gpt-3.5-turbo)"
-    echo "  TESTING     - Testing mode true/false (default: false)"
+    echo "  RUN_NAME            - Name for this experimental run (default: alfworld_run_TIMESTAMP)"
+    echo "  LLM_MODEL           - LLM model to use (default: gpt-4o-mini)"
+    echo "  TESTING             - Testing mode true/false (default: false)"
+    echo "  MAX_NUM_RULES       - Max number of insights to extract (default: 10)"
+    echo "  SUCCESS_CRITIQUE_NUM - Number of success examples to analyze (default: 8)"
+    echo ""
+    echo "Features:"
+    echo "  ✨ Unified Training: Runs both Experience Gathering and Insights Extraction in one command"
+    echo "  🚀 Simplified Pipeline: No need to manage intermediate run names"
+    echo "  📊 Automatic Progress: Clear visual indicators for each phase"
+    echo "  💾 Checkpoint Support: Resume from any point in the pipeline"
     echo ""
     echo "Examples:"
-    echo "  $0                                    # Use defaults"
-    echo "  $0 my_experiment                      # Custom run name"
-    echo "  $0 my_experiment gpt-4               # Custom run name and model"
-    echo "  $0 my_experiment gpt-4 true          # Enable testing mode"
+    echo "  $0                                          # Use all defaults"
+    echo "  $0 my_experiment                            # Custom run name"
+    echo "  $0 my_experiment gpt-4                     # Custom run name and model"
+    echo "  $0 my_experiment gpt-4 false               # Specify testing mode"
+    echo "  $0 my_experiment gpt-4 false 15 10         # Full customization"
+    echo "  $0 test_run gpt-4o-mini true               # Testing mode (no API calls)"
+    echo ""
+    echo "Pipeline Phases:"
+    echo "  1. 🏃 Unified Two-Phase Training:"
+    echo "     • Phase 1: Experience Gathering (agent learns from environment)"
+    echo "     • Phase 2: Insights Extraction (extract actionable insights)"
+    echo "  2. 📈 Evaluation (test performance with extracted insights)"
+    echo ""
+    echo "Output Locations:"
+    echo "  • Training Data: logs/alfworld/expel/[RUN_NAME].pkl"
+    echo "  • Insights: logs/alfworld/expel/extracted_insights/[RUN_NAME].pkl"
+    echo "  • Evaluation: logs/alfworld/expel/eval/[RUN_NAME]_eval.pkl"
     echo ""
     echo "Note: Make sure you have set up your OpenAI API key in .env file or as environment variable"
 }
