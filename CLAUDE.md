@@ -153,7 +153,7 @@ python train.py benchmark=alfworld run_name=my_experiment agent.llm=gpt-4 agent.
 
 **Phase Control Examples**:
 ```bash
-# Run both phases (default)
+# Run both phases (default from config)
 python train.py benchmark=alfworld run_name=test
 
 # Run only Phase 1
@@ -161,6 +161,9 @@ python train.py benchmark=alfworld run_name=test run_phase_1=true run_phase_2=fa
 
 # Run only Phase 2 (requires existing Phase 1 data)
 python train.py benchmark=alfworld run_name=test run_phase_1=false run_phase_2=true agent.llm=gpt-4 agent.max_num_rules=10
+
+# Use the simplified shell script (recommended)
+./run_expel_alfworld.sh my_experiment gpt-4
 ```
 
 ### Key Data Flow

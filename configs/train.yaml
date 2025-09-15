@@ -13,6 +13,10 @@ testing: true
 resume: false
 auto_resume: false
 
+# Unified training phase control
+run_phase_1: true    # Enable Training Phase 1 (Experience Gathering)
+run_phase_2: true    # Enable Training Phase 2 (Insights Extraction)
+
 # remove hydra output files
 hydra:  
   output_subdir: null  

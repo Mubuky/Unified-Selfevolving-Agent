@@ -103,9 +103,7 @@ main() {
         agent.max_num_rules="$MAX_NUM_RULES" \
         agent.success_critique_num="$SUCCESS_CRITIQUE_NUM" \
         testing="$TESTING" \
-        resume=false \
-        run_phase_1=true \
-        run_phase_2=true
+        resume=false
 
     check_success "Unified Two-Phase Training"
 
@@ -157,12 +155,16 @@ show_help() {
     echo "  💾 Checkpoint Support: Resume from any point in the pipeline"
     echo ""
     echo "Examples:"
-    echo "  $0                                          # Use all defaults"
+    echo "  $0                                          # Use all defaults (both phases)"
     echo "  $0 my_experiment                            # Custom run name"
     echo "  $0 my_experiment gpt-4                     # Custom run name and model"
     echo "  $0 my_experiment gpt-4 false               # Specify testing mode"
     echo "  $0 my_experiment gpt-4 false 15 10         # Full customization"
     echo "  $0 test_run gpt-4o-mini true               # Testing mode (no API calls)"
+    echo ""
+    echo "Advanced Phase Control (if needed):"
+    echo "  python train.py benchmark=alfworld run_name=test run_phase_1=false run_phase_2=true"
+    echo "  python train.py benchmark=alfworld run_name=test run_phase_1=true run_phase_2=false"
     echo ""
     echo "Pipeline Phases:"
     echo "  1. 🏃 Unified Two-Phase Training:"
