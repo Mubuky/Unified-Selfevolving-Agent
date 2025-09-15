@@ -28,6 +28,11 @@ class ExpelRetrieval(BaseRetrieval):
     including document setup, query construction, and similarity search.
     """
 
+    def __init__(self, *args, **kwargs):
+        """Initialize ExpelRetrieval with vectorstore."""
+        super().__init__(*args, **kwargs)
+        self.vectorstore = None
+
     def setup_documents(self,
                        succeeded_trial_history: Dict[str, List[Any]],
                        all_fewshots: Any,

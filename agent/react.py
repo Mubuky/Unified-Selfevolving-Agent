@@ -13,6 +13,7 @@ from prompts.templates.human import (
     human_task_message_prompt,
 )
 from utils import print_message, token_counter
+from constructor import ExpelConstructor
 
 class ReactAgent(BaseAgent):
     """
@@ -69,9 +70,21 @@ class ReactAgent(BaseAgent):
         del openai_api_key
         self.token_counter = partial(token_counter, llm=llm, tokenizer=getattr(self.llm, 'tokenizer', None))
 
+        # Update dynamic components first to initialize system_instruction
+        self.update_dynamic_prompt_components()
+
+        # Initialize prompt constructor after system_instruction is set
+        self.constructor = ExpelConstructor(
+            benchmark_name=benchmark_name,
+            system_instruction=self.system_instruction,
+            human_instruction=self.human_instruction,
+            system_prompt=self.system_prompt,
+            ai_name=self.name,
+            human_instruction_kwargs=self.human_instruction_kwargs
+        )
+
         # build base prompt
         self._build_agent_prompt()
-        self.update_dynamic_prompt_components()
 
         self.long_pass = None
 
@@ -168,23 +181,26 @@ class ReactAgent(BaseAgent):
             )
 
     def _build_agent_prompt(self) -> None:
-        system_prompt = self.system_prompt.format_messages(
-            instruction=self.system_instruction, ai_name=self.name
-        )
-        self.prompt_history.extend(system_prompt)
-        self._build_fewshot_prompt(
-            fewshots=self.fewshots, prompt_history=self.prompt_history,
-            instruction_prompt=self.human_instruction,
-            instruction_prompt_kwargs=self.human_instruction_kwargs,
-            prompt_type='react_type',
-        )
-        self.prompt_history = self.collapse_prompts(self.prompt_history)
+        # Build system and fewshot prompts first
+        system_messages = self.constructor.build_system_prompt()
+        fewshot_messages = self.constructor.build_fewshot_prompt(self.fewshots)
+
+        self.prompt_history = system_messages + fewshot_messages
+        self.prompt_history = self.constructor.collapse_prompts(self.prompt_history)
         self.log_idx = len(self.prompt_history)
+
+        # Insert before task (for rules in ExpelAgent)
         self.insert_before_task_prompt()
 
-        self.prompt_history.append(human_task_message_prompt.format_messages(task=self.remove_task_suffix(self.task))[0])
+        # Add task description
+        task_messages = self.constructor.build_task_prompt(self.remove_task_suffix(self.task))
+        self.prompt_history.extend(task_messages)
+
+        # Insert after task
         self.insert_after_task_prompt()
-        self.prompt_history = self.collapse_prompts(self.prompt_history)
+
+        # Final collapse
+        self.prompt_history = self.constructor.collapse_prompts(self.prompt_history)
         self.pretask_idx = len(self.prompt_history)
         return self.prompt_history
 
@@ -227,29 +243,10 @@ class ReactAgent(BaseAgent):
         return self.success, self.fail, self.halted
 
     def collapse_prompts(self, prompt_history: List[ChatMessage]) -> List[ChatMessage]:
-        """Courtesy of GPT4"""
-        if not prompt_history:
-            return []
+        """Use constructor's collapse_prompts method"""
+        return self.constructor.collapse_prompts(prompt_history)
 
-        new_prompt_history = []
-        scratch_pad = prompt_history[0].content
-        last_message_type = type(prompt_history[0])
-
-        for message in prompt_history[1:]:
-            current_message_type = type(message)
-            if current_message_type == last_message_type:
-                scratch_pad += '\n' + message.content
-            else:
-                new_prompt_history.append(last_message_type(content=scratch_pad))
-                scratch_pad = message.content
-                last_message_type = current_message_type
-
-        # Handle the last accumulated message
-        new_prompt_history.append(last_message_type(content=scratch_pad))
-
-        return new_prompt_history
-
-    def update_dynamic_prompt_components(self):
+    def update_dynamic_prompt_components(self, reset: bool = False):
         #####################
         # Updating fewshots #
         #####################
@@ -268,6 +265,11 @@ class ReactAgent(BaseAgent):
         # if system gives instruction, then human instruction is empty
         self.human_instruction_kwargs['instruction'] = ''
         self.num_fewshots = len(self.fewshots)
+
+        # Update constructor if it exists
+        if hasattr(self, 'constructor'):
+            self.constructor.system_instruction = self.system_instruction
+            self.constructor.human_instruction_kwargs = self.human_instruction_kwargs
 
     def load_checkpoint(self, loaded_dict: Dict[str, Any], no_load_list: List['str'] = []) -> None:
         for k, v in loaded_dict.items():

@@ -72,6 +72,10 @@ class ExpelAgent(ReflectAgent):
         self.idx2task = {idx: task['task'] for idx, task in enumerate(self.tasks)}
         self.task2idx = {task['task']: idx for idx, task in enumerate(self.tasks)}
 
+        # Update constructor with rule template for ExpelAgent
+        if hasattr(self, 'constructor') and self.rule_template is not None:
+            self.constructor.rule_template = self.rule_template
+
         # Initialize retrieval system
         self.retrieval = ExpelRetrieval(
             embedder=self.embedder,
@@ -425,10 +429,9 @@ class ExpelAgent(ReflectAgent):
         if self.training:
             return ReflectAgent.insert_before_task_prompt(self)
         # if eval, add the manual
-        if not self.no_rules:
-            self.prompt_history.append(
-                self.rule_template.format_messages(rules=self.rules)[0]
-            )
+        if not self.no_rules and hasattr(self, 'rules'):
+            rules_messages = self.constructor.build_rules_prompt(self.rules)
+            self.prompt_history.extend(rules_messages)
 
     def insert_after_task_prompt(self):
         pass
@@ -487,70 +490,80 @@ class ExpelAgent(ReflectAgent):
 
         # Select retrieval strategy and get fewshots using retrieval system
         if self.fewshot_strategy == 'random':
-            self.vectorstore = self.retrieval.create_filtered_vectorstore('random', self.env.env_name)
+            vectorstore = self.retrieval.create_filtered_vectorstore('random', self.env.env_name)
+            self.retrieval.vectorstore = vectorstore
+            self.vectorstore = vectorstore
             self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'task', self.task)
         elif self.fewshot_strategy == 'rotation':
             # Use task to retrieve if no trajectory available
             if trajectory is None or self.prompt_history == [] or len(trajectory.thoughts) < 1 or trajectory.thoughts[0] == '':
-                self.vectorstore = self.retrieval.create_filtered_vectorstore('task_similarity', self.env.env_name)
+                vectorstore = self.retrieval.create_filtered_vectorstore('task_similarity', self.env.env_name)
+                self.retrieval.vectorstore = vectorstore
+                self.vectorstore = vectorstore
                 self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'task', self.task)
             else:
                 last_step_type = self.identifier(self.message_splitter(trajectory.trajectory)[-1])
                 if last_step_type == 'thought':
-                    self.vectorstore = self.retrieval.create_filtered_vectorstore('thought_similarity', self.env.env_name)
+                    vectorstore = self.retrieval.create_filtered_vectorstore('thought_similarity', self.env.env_name)
+                    self.retrieval.vectorstore = vectorstore
+                    self.vectorstore = vectorstore
                     self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'thought', self.task)
                 elif last_step_type == 'observation':
-                    self.vectorstore = self.retrieval.create_filtered_vectorstore('step_similarity', self.env.env_name)
+                    vectorstore = self.retrieval.create_filtered_vectorstore('step_similarity', self.env.env_name)
+                    self.retrieval.vectorstore = vectorstore
+                    self.vectorstore = vectorstore
                     self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'step', self.task)
         elif self.fewshot_strategy == 'task_thought_similarity':
             # Use task to retrieve
             if trajectory is None or self.prompt_history == [] or len(trajectory.thoughts) < 1 or trajectory.thoughts[0] == '':
-                self.vectorstore = self.retrieval.create_filtered_vectorstore('task_similarity', self.env.env_name)
+                vectorstore = self.retrieval.create_filtered_vectorstore('task_similarity', self.env.env_name)
+                self.retrieval.vectorstore = vectorstore
+                self.vectorstore = vectorstore
                 self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'task', self.task)
             else:
-                self.vectorstore = self.retrieval.create_filtered_vectorstore('thought_similarity', self.env.env_name)
+                vectorstore = self.retrieval.create_filtered_vectorstore('thought_similarity', self.env.env_name)
+                self.retrieval.vectorstore = vectorstore
+                self.vectorstore = vectorstore
                 self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'thought', self.task)
         elif self.fewshot_strategy == 'task_similarity':
             # Retrieve task as the query, and task as the keys for successful trials
-            self.vectorstore = self.retrieval.create_filtered_vectorstore('task_similarity', self.env.env_name)
+            vectorstore = self.retrieval.create_filtered_vectorstore('task_similarity', self.env.env_name)
+            self.retrieval.vectorstore = vectorstore
+            self.vectorstore = vectorstore
             self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'task', self.task)
         elif self.fewshot_strategy == 'thought_similarity':
             if trajectory is None or self.prompt_history == [] or len(trajectory.thoughts) < 1 or trajectory.thoughts[0] == '':
                 ReactAgent.update_dynamic_prompt_components(self)
             else:
                 # Use the latest thoughts to retrieve fewshots
-                self.vectorstore = self.retrieval.create_filtered_vectorstore('thought_similarity', self.env.env_name)
+                vectorstore = self.retrieval.create_filtered_vectorstore('thought_similarity', self.env.env_name)
+                self.retrieval.vectorstore = vectorstore
+                self.vectorstore = vectorstore
                 self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'thought', self.task)
         elif self.fewshot_strategy == 'action_similarity':
             if trajectory is None or self.prompt_history == [] or len(trajectory.actions) < 1:
                 ReactAgent.update_dynamic_prompt_components(self)
             else:
                 # Use the latest actions to retrieve fewshots
-                self.vectorstore = self.retrieval.create_filtered_vectorstore('action_similarity', self.env.env_name)
+                vectorstore = self.retrieval.create_filtered_vectorstore('action_similarity', self.env.env_name)
+                self.retrieval.vectorstore = vectorstore
+                self.vectorstore = vectorstore
                 self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'action', self.task)
         elif self.fewshot_strategy == 'step_similarity':
             if trajectory is None or self.prompt_history == [] or len(trajectory.observations) < 1:
                 ReactAgent.update_dynamic_prompt_components(self)
             else:
-                self.vectorstore = self.retrieval.create_filtered_vectorstore('step_similarity', self.env.env_name)
+                vectorstore = self.retrieval.create_filtered_vectorstore('step_similarity', self.env.env_name)
+                self.retrieval.vectorstore = vectorstore
+                self.vectorstore = vectorstore
                 self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'step', self.task)
         else:
             raise NotImplementedError
 
-        # Update prompt history with new fewshots
-        new_fewshots = '\n\n'.join(self.fewshots)
-        replaced = False
-        for i, history_message in enumerate(self.prompt_history):
-            if old_fewshots in history_message.content:
-                message_type = type(history_message)
-                self.prompt_history[i] = message_type(
-                    content=history_message.content.replace(old_fewshots, new_fewshots)
-                )
-                replaced = True
-                break
-
-        if not replaced and self.testing:
-            self.prompt_history.append(HumanMessage(content="WARNING. Fewshots haven't been replaced."))
+        # Update prompt history with new fewshots using constructor
+        self.prompt_history = self.constructor.update_prompt_with_fewshots(
+            self.prompt_history, old_fewshots, self.fewshots
+        )
 
 # Utils function
 def parse_rules(llm_text):
