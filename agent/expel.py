@@ -16,6 +16,7 @@ from agent.reflect import Count
 from utils import random_divide_list, save_trajectories_log, get_env_name_from_task
 from memory import Trajectory
 from retrieval import ExpelRetrieval
+from manager import ExpelManager
 
 from copy import deepcopy
 
@@ -93,6 +94,20 @@ class ExpelAgent(ReflectAgent):
             token_counter=self.token_counter
         )
 
+        # Initialize insights extraction manager
+        self.manager = ExpelManager(
+            agent=self,
+            system_critique_instructions=self.system_critique_instructions,
+            human_critiques=self.human_critiques,
+            rule_template=self.rule_template,
+            max_num_rules=self.max_num_rules,
+            critique_truncate_strategy=self.critique_truncate_strategy,
+            success_critique_num=self.success_critique_num,
+            critique_summary_suffix=self.critique_summary_suffix,
+            benchmark_name=self.benchmark_name,
+            testing=kwargs.get('testing', False),
+        )
+
     @property
     def training(self) -> bool:
         return self._train
@@ -145,151 +160,42 @@ class ExpelAgent(ReflectAgent):
     ################# CRITIQUES #################
 
     def task_critique(self, task: str, return_log: bool = False) -> Union[None, str]:
-        # only critique if the task has success
-        if task not in self.critiques:
-            self.critiques[task] = []
-        if return_log:
-            log = ''
-        if self.succeeded_trial_history[task] != []:
-            # if first time critiquing the task
-            for traj in self.succeeded_trial_history[task]:
-                success_history = traj.trajectory.strip()
-                # forming critiques by comparing successful and failed trials
-                for fail_history in self.failed_trial_history[task]:
-                    critiques: str = self.prompt_critique(
-                        success_history=success_history,
-                        fail_history=fail_history.trajectory.lstrip(),
-                    )
-                    if return_log:
-                        log += success_history + '\n' + fail_history.trajectory.strip() + '\n' + critiques + '\n\n'
-                    critiques: List[str] = critiques.split('\n- ' if not self.testing else '\\n- ')
-                    self.critiques[task].extend(critiques)
-                pattern = r"\s*\([^()]*\)"
-                self.critiques[task] = [re.sub(pattern, '', critique).strip().strip('- ') for critique in self.critiques[task]]
-                # removing empty critique
-                self.critiques[task] = [critique for critique in self.critiques[task] if critique != '']
-
-        if return_log:
-            return log
+        """Delegate task critique generation to the manager."""
+        return self.manager.task_critique(task=task, return_log=return_log)
 
     def success_critique(self, training_ids: List[int]) -> None:
-        # make sure to only take the training ids, assuming theres only one success trajectory per task
-        all_success = []
-        for task in self.succeeded_trial_history:
-            idx = self.task2idx[task]
-            if idx in training_ids and len(self.succeeded_trial_history[task]) > 0:
-                all_success.append((self.remove_task_suffix(task), self.succeeded_trial_history[task][0].trajectory))
-        all_success = random_divide_list(all_success, self.success_critique_num)
-        # refresh the success critiques
-        self.all_success_critiques = {}
-        for success_chunk in all_success:
-            success_trials = '\n\n'.join([task + '\n' + trajectory for task, trajectory in success_chunk])
-            critiques: str = self.prompt_critique(success_history=success_trials.strip(), fail_history=None)
-            critiques: List[str] = critiques.split('\n- ' if not self.testing else '\\n- ')
-            key = '\n'.join([task for task, _ in success_chunk])
-            self.all_success_critiques[key] = critiques
-            pattern = r"\s*\([^()]*\)"
-            self.all_success_critiques[key] = [re.sub(pattern, '', critique).strip().strip('- ') for critique in self.all_success_critiques[key]]
-            # removing empty critique
-            self.all_success_critiques[key] = [critique for critique in self.all_success_critiques[key] if critique != '']
+        """Delegate success critique generation to the manager."""
+        return self.manager.success_critique(training_ids=training_ids)
 
     def failure_critique(self) -> None:
-        self.all_fail_critiques = {}
-        for task, failed_trajectories in self.failed_trial_history.items():
-            # only critiquing if the task has failed more than once
-            if len(failed_trajectories) > 1:
-                failed_trials = '\n\n'.join([traj.trajectory for traj in failed_trajectories])
-                if self.token_counter(failed_trials) > 13000:
-                    print('TRUNCATING FAILED TRIALS')
-                    if self.critique_truncate_strategy == 'random':
-                        idx = np.random.choice(range(len(failed_trajectories)), size=len(failed_trajectories) - 1, replace=False)
-                        failed_trials = '\n\n'.join([traj.trajectory for i, traj in enumerate(failed_trajectories) if i in idx])
-                    elif self.critique_truncate_strategy == 'longest':
-                        filtered_idx = max(range(len(failed_trajectories)), key=lambda i: self.token_counter(failed_trajectories[i].trajectory))
-                        failed_trials = '\n\n'.join([traj.trajectory for i, traj in enumerate(failed_trajectories) if i != filtered_idx])
-                    elif self.critique_truncate_strategy == 'shortest':
-                        filtered_idx = min(range(len(failed_trajectories)), key=lambda i: self.token_counter(failed_trajectories[i].trajectory))
-                        failed_trials = '\n\n'.join([traj.trajectory for i, traj in enumerate(failed_trajectories) if i != filtered_idx])
-                    else:
-                        raise NotImplementedError
-                critiques: str = self.prompt_critique(success_history=None, fail_history=failed_trials.strip(), task=task)
-                critiques: List[str] = critiques.split('\n- ' if not self.testing else '\\n- ')
-                self.all_fail_critiques[task] = critiques
-                pattern = r"\s*\([^()]*\)"
-                self.all_fail_critiques[task] = [re.sub(pattern, '', critique).strip().strip('- ') for critique in self.all_fail_critiques[task]]
-                # removing empty critique
-                self.all_fail_critiques[task] = [critique for critique in self.all_fail_critiques[task] if critique != '']
-            else:
-                self.all_fail_critiques[task] = []
+        """Delegate failure critique generation to the manager."""
+        return self.manager.failure_critique()
 
-    def _build_critique_prompt(self, success_history: Trajectory, fail_history: str = Trajectory, existing_rules: List[str] = None, task: str = None, reflections: List[str] = None) -> List[HumanMessage]:
-        critique_history = []
-        if reflections is not None:
-            critique_type = 'all_reflection'
-        elif fail_history is not None and success_history is not None:
-            critique_type = 'compare'
-        elif fail_history is None and success_history is not None:
-            critique_type = 'all_success'
-        elif fail_history is not None and success_history is None:
-            critique_type = 'all_fail'
-        if existing_rules is not None:
-            critique_type += '_existing_rules'
-        if existing_rules == []:
-            existing_rules = ['']
-
-        # system prompt
-        critique_history.extend(self.system_prompt.format_messages(
-            instruction=self.system_critique_instructions[critique_type].format(
-                fewshots=[],
-            ),
-            ai_name='an advanced reasoning agent that can critique past task trajectories of youself' if existing_rules is None \
-                else 'an advanced reasoning agent that can add, edit or remove rules from your existing rule set, based on forming new critiques of past task trajectories',
-        ))
-        # task_prompt
-        human_format_dict = dict(instruction='',)
-        if critique_type == 'compare':
-            human_format_dict['task'] = task
-        if fail_history is not None:
-            human_format_dict['fail_history'] = fail_history
-            human_format_dict['task'] = task
-        if success_history is not None:
-            human_format_dict['success_history'] = success_history
-        if reflections is not None:
-            human_format_dict['reflections_list'] = '- ' + '\n- '.join(reflections)
-        if existing_rules is not None:
-            human_format_dict['existing_rules'] = '\n'.join([f'{i}. {r}' for i, r in enumerate(existing_rules, 1)])
-        human_critique_summary_message = self.human_critiques[critique_type].format_messages(**human_format_dict)[0]
-        critique_summary_suffix = self.critique_summary_suffix['full'] if self.max_num_rules <= len(self.rule_items_with_count) else self.critique_summary_suffix['not_full']
-        human_critique_summary_message.content = human_critique_summary_message.content + critique_summary_suffix
-        critique_history.append(human_critique_summary_message)
-        return critique_history
+    def _build_critique_prompt(self, success_history: str, fail_history: str = None, existing_rules: List[str] = None, task: str = None, reflections: List[str] = None) -> List[HumanMessage]:
+        """Delegate critique prompt building to the manager."""
+        return self.manager.build_critique_prompt(
+            success_history=success_history,
+            fail_history=fail_history,
+            existing_rules=existing_rules,
+            task=task,
+            reflections=reflections
+        )
 
     def prepare_new_eval(self) -> None:
         self.succeeded_trial_history = {}
         self.failed_trial_history = {}
 
     def prompt_critique(
-        self, success_history: Trajectory, fail_history: Trajectory,
+        self, success_history: str, fail_history: str,
         existing_rules: List[str] = None, task: str = None, reflections: List[str] = None) -> str:
-        critique_history = self.collapse_prompts(
-            self._build_critique_prompt(success_history, fail_history, existing_rules, task if task is None else self.remove_task_suffix(task), reflections)
+        """Delegate critique generation to the manager."""
+        return self.manager.prompt_critique(
+            success_history=success_history,
+            fail_history=fail_history,
+            existing_rules=existing_rules,
+            task=task,
+            reflections=reflections
         )
-        print("\n###################################\n")
-        if self.testing:
-            print('###################################')
-            for prompt in critique_history:
-                self.print_message(prompt, self.token_counter)
-            return input()
-        # just use the base llm for critiques
-        try:
-            returns = self.llm(critique_history, replace_newline=False)
-        except openai.BadRequestError:
-            returns = self.long_context_llm(critique_history, replace_newline=False)
-        for i, m in enumerate(critique_history):
-            self.print_message(m)
-            if i == len(critique_history) - 1:
-                print(returns)
-        return returns
 
     ################# EVALUATION #################
 
@@ -319,110 +225,18 @@ class ExpelAgent(ReflectAgent):
         eval_idx_list: List[int] = None,
         saving_dict: bool = False,
     ) -> str:
-        if load_cache_fold is not None:
-            self.rules = '\n'.join([f'{i}. {item}' for i, item in enumerate(self.cache_rules.get(load_cache_fold, []), 1)])
-            return
-
-        def extend_rules(rule_items: List[str], success_history: str = None, fail_history: str = None, task: str = None, reflections: List[str] = None) -> List[str]:
-            llm_output: str = self.prompt_critique(
-                success_history=success_history,
-                fail_history=fail_history,
-                existing_rules=rule_items,
-                reflections=reflections,
-                task=task,
-            )
-            parsed_operations = parse_rules(llm_output)
-
-            # update the rule_items with counter
-            self.rule_items_with_count = update_rules(self.rule_items_with_count, parsed_operations, list_full = self.max_num_rules+5 <= len(self.rule_items_with_count))
-
-            new_ordered_rules_str = [rule[0] for rule in self.rule_items_with_count]
-            return new_ordered_rules_str, llm_output
-
-        # Shuffling the rules into a pool
-        resume_flag = fail_resume_flag = loaded_dict is None
-        if resume_flag:
-            self.rule_items = []
-            self.rule_items_with_count: List[tuple(str, int)] = []
-        agent_dicts = []
-        if loaded_log is None:
-            all_logs = '################ Compare Critiques ################\n'
-        else:
-            all_logs = loaded_log
-        for training_id in training_ids:
-            training_task = self.idx2task[training_id]
-            if (loaded_dict is not None and loaded_dict['critique_summary_section'] == 'compare' and \
-                loaded_dict['critique_summary_idx'][0] == training_id):
-                resume_flag = True
-                # if there are still failed tasks to do, then dont continue, otherwise do the next idx's critiques
-                if len(self.failed_trial_history[training_task]) - 1 <= loaded_dict['critique_summary_idx'][1]:
-                    fail_resume_flag = True
-                    continue
-            elif not resume_flag:
-                continue
-            if self.succeeded_trial_history[training_task] != []:
-                # if first time critiquing the task
-                for traj in self.succeeded_trial_history[training_task]:
-                    success_history = traj.trajectory.strip()
-                    # forming critiques by comparing successful and failed trials
-                    for e, fail_history in enumerate(self.failed_trial_history[training_task]):
-                        if fail_resume_flag:
-                            pass
-                        elif e <= loaded_dict['critique_summary_idx'][1]:
-                            continue
-                        fail_resume_flag = True
-                        self.rule_items, llm_output = extend_rules(self.rule_items, success_history, fail_history.trajectory.strip(), training_task)
-                        all_logs += training_task + '\n' + success_history + '\n' + fail_history.trajectory.strip() + f'\n-------\n{llm_output}\n-------\n' +'\n- ' + '\n- '.join([str(r) + " {" + str(c) + "}" for r, c in self.rule_items_with_count]) + '\n\n'
-                        if saving_dict:
-                            save_dict = {k: deepcopy(v) for k, v in self.__dict__.items() if type(v) in [list, set, str, bool, int, dict, Count] and k not in ['openai_api_key', 'llm']}
-                            save_dict['critique_summary_section'] = 'compare'
-                            save_dict['critique_summary_idx'] = (training_id, e)
-                            save_dict['critique_summary_fold'] = cache_fold if cache_fold is not None else 0
-                            save_dict['critique_summary_log'] = all_logs
-                            save_dict['eval_idx_list'] = eval_idx_list
-                            agent_dicts.append(save_dict)
-                            save_trajectories_log(path=logging_dir, log=all_logs, dicts=agent_dicts, run_name=run_name, save_true_log=False)
-
-        # SUCCESS
-        if loaded_log is None or loaded_dict['critique_summary_section'] in ['compare']:
-            all_logs += '\n\n################ SUCCESS CRITIQUES ################\n'
-        else:
-            all_logs = loaded_log
-        if loaded_dict is None or loaded_dict['critique_summary_section'] == 'compare':
-            for training_id in training_ids:
-                all_success = []
-                for idx, task in enumerate(self.succeeded_trial_history):
-                    if idx in training_ids and len(self.succeeded_trial_history[task]) > 0:
-                        all_success.append((task, self.succeeded_trial_history[task][0].trajectory))
-                all_success = random_divide_list(all_success, self.success_critique_num)
-        else:
-            all_success = loaded_dict['critique_summary_all_success']
-        for success_chunk in all_success:
-            if (loaded_dict is not None and loaded_dict['critique_summary_section'] == 'success' and \
-                loaded_dict['critique_summary_idx'] == success_chunk):
-                resume_flag = True
-                continue
-            elif not resume_flag:
-                continue
-            success_trials = '\n\n'.join([self.remove_task_suffix(task) + '\n' + trajectory for task, trajectory in success_chunk])
-            self.rule_items, llm_output = extend_rules(self.rule_items, success_trials.strip(), None)
-            all_logs += success_trials.strip() + f'\n-------\n{llm_output}\n-------' + '\n- ' + '\n- '.join([str(r) + " {" + str(c) + "}" for r, c in self.rule_items_with_count]) + '\n\n'
-            if saving_dict:
-                save_dict = {k: deepcopy(v) for k, v in self.__dict__.items() if type(v) in [list, set, str, bool, int, dict, Count] and k not in ['openai_api_key', 'llm']}
-                save_dict['critique_summary_all_success'] = all_success
-                save_dict['critique_summary_idx'] = success_chunk
-                save_dict['critique_summary_section'] = 'success'
-                save_dict['critique_summary_fold'] = cache_fold if cache_fold is not None else 0
-                save_dict['critique_summary_log'] = all_logs
-                save_dict['eval_idx_list'] = eval_idx_list
-                agent_dicts.append(save_dict)
-                save_trajectories_log(path=logging_dir, log=all_logs, dicts=agent_dicts, run_name=run_name, save_true_log=False)
-
-        # numbered list format
-        self.rules = '\n'.join([f"{i}. {item}" for i, item in enumerate(self.rule_items, 1)])
-        if cache_fold is not None:
-            self.cache_rules[cache_fold] = list(self.rule_items)
-        return all_logs
+        """Delegate insights extraction to the manager."""
+        return self.manager.create_rules(
+            training_ids=training_ids,
+            cache_fold=cache_fold,
+            load_cache_fold=load_cache_fold,
+            logging_dir=logging_dir,
+            run_name=run_name,
+            loaded_dict=loaded_dict,
+            loaded_log=loaded_log,
+            eval_idx_list=eval_idx_list,
+            saving_dict=saving_dict,
+        )
 
     def insert_before_task_prompt(self):
         # if training then reflect
@@ -557,83 +371,3 @@ class ExpelAgent(ReflectAgent):
         # Update prompt_history reference for compatibility
         self.prompt_history = self.constructor.get_prompt_history_for_compatibility()
 
-# Utils function
-def parse_rules(llm_text):
-    pattern = r'((?:REMOVE|EDIT|ADD|AGREE)(?: \d+|)): (?:[a-zA-Z\s\d]+: |)(.*)'
-    matches = re.findall(pattern, llm_text)
-
-    res = []
-    banned_words = ['ADD', 'AGREE', 'EDIT']
-    for operation, text in matches:
-        text = text.strip()
-        if text != '' and not any([w in text for w in banned_words]) and text.endswith('.'):
-        # if text is not empty
-        # if text doesn't contain banned words (avoid weird formatting cases from llm)
-        # if text ends with a period (avoid cut off sentences from llm)
-            if 'ADD' in operation:
-                res.append(('ADD', text))
-            else:
-                res.append((operation.strip(), text))
-    return(res)
-
-def retrieve_rule_index(rules, operation):
-    operation_rule_text = operation[1]
-    for i in range(len(rules)):
-        if rules[i][0] in operation_rule_text:
-            return i
-
-def is_existing_rule(rules, operation_rule_text):
-    for i in range(len(rules)):
-        if rules[i][0] in operation_rule_text:
-            return True
-    return False
-
-# Given list of tuples with (rule text, number of edits) and tuple of (operations, text), returns updated list of tuples
-def update_rules(rules: List[Tuple[str, int]], operations: List[Tuple[str, str]], list_full: bool = False) -> List[Tuple[str, int]]:
-    # remove problematic operations
-    delete_indices = []
-    for i in range(len(operations)):
-        operation, operation_rule_text = operations[i]
-        operation_type = operation.split(' ')[0]
-        rule_num = int(operation.split(' ')[1]) if ' ' in operation else None
-
-        if operation_type == 'ADD':
-            if is_existing_rule(rules, operation_rule_text): # if new rule_text is an existing rule ('in')
-                delete_indices.append(i)
-        else:
-            if operation_type == 'EDIT':
-                if is_existing_rule(rules, operation_rule_text): # if rule is matching ('in') existing rule, change it to AGREE 
-                    rule_num = retrieve_rule_index(rules, (operation, operation_rule_text))
-                    operations[i] = (f'AGREE {rule_num+1}', rules[rule_num][0])
-                elif (rule_num is None) or (rule_num > len(rules)):   # if rule doesn't exist, remove
-                    delete_indices.append(i)
-
-            elif operation_type == 'REMOVE' or operation_type == 'AGREE':
-                if not is_existing_rule(rules, operation_rule_text): # if new operation_rule_text is not an existing rule
-                    delete_indices.append(i)
-
-    operations = [operations[i] for i in range(len(operations)) if i not in delete_indices] # remove problematic operations
-
-    for op in ['REMOVE', 'AGREE', 'EDIT', 'ADD']: # Order is important
-        for i in range(len(operations)):
-            operation, operation_rule_text = operations[i]
-            operation_type = operation.split(' ')[0]
-            if operation_type != op:
-                continue
-
-            if operation_type == 'REMOVE': # remove rule: -1
-                rule_index = retrieve_rule_index(rules, (operation, operation_rule_text)) # if rule_num doesn't match but text does
-                remove_strength = 3 if list_full else 1
-                rules[rule_index] = (rules[rule_index][0], rules[rule_index][1]-remove_strength) # -1 (-3 if list full) to the counter
-            elif operation_type == 'AGREE': # agree with rule: +1
-                rule_index = retrieve_rule_index(rules, (operation, operation_rule_text)) # if rule_num doesn't match but text does
-                rules[rule_index] = (rules[rule_index][0], rules[rule_index][1]+1) # +1 to the counter
-            elif operation_type == 'EDIT': # edit the rule: +1 // NEED TO BE AFTER REMOVE AND AGREE
-                rule_index = int(operation.split(' ')[1])-1
-                rules[rule_index] = (operation_rule_text, rules[rule_index][1]+1) # +1 to the counter
-            elif operation_type == 'ADD': # add new rule: +2
-                rules.append((operation_rule_text, 2))
-    rules = [rules[i] for i in range(len(rules)) if rules[i][1] > 0] # remove rules when counter reach 0
-    rules.sort(key=lambda x: x[1], reverse=True)
-
-    return rules

@@ -117,7 +117,9 @@ Add `testing=true` to any command to run without OpenAI API calls (for developme
 
 2. **Training Phase 2 (Insight Extraction)**:
    - ExpelStorage loads experiences via `load_experience()` method
-   - Analyzes collected experiences to extract actionable insights and rules
+   - ExpelManager analyzes collected experiences to extract actionable insights and rules
+   - Uses success/failure trajectory comparison for critique generation
+   - Applies rule parsing and updating logic with weighted prioritization
    - ExpelStorage saves insights via `save_insights()` method
 
 3. **Evaluation**:
@@ -160,6 +162,15 @@ Uses Hydra for configuration management:
 - Advanced LLM interaction workflow including error handling and retry mechanisms
 - Unified few-shot replacement, message collapsing, and conversation state management
 - Direct LLM integration with testing mode support and long context fallback
+
+**ExpelManager orchestrates insights extraction process**:
+- Core logic for Training Phase 2 (Insights Extraction) operations
+- Critique generation from success/failure trajectory comparisons
+- Rule parsing and updating with ADD/EDIT/REMOVE/AGREE operations
+- Multi-type critique analysis: task comparison, success-only, failure-only
+- Rule prioritization system with weighted scoring and automatic pruning
+- Complete rule extraction workflow from raw experiences to formatted insights
+- Integrated with LLM for automated critique generation and rule refinement
 
 ## Environment-Specific Setup
 
