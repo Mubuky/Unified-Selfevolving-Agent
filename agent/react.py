@@ -56,19 +56,14 @@ class ReactAgent(BaseAgent):
         self.observation_formatter = observation_formatter
         self._last_observation_history = None
 
-        self.env = env(**self.tasks[self.task_idx]['env_kwargs'], max_steps=self.max_steps)
-        self.env.reset()
-        self.task = self.tasks[self.task_idx]['task']
-        self.reset()
-        self.truncated, self.reward, self.terminated = False, False, False
-        self.print_message = partial(print_message, testing=testing)
-
-        self.success, self.fail, self.halted = 0, 0, 0
-
         self.llm = llm_builder(llm_name=llm, openai_api_key=openai_api_key, long_ver=False, base_url=base_url)
         self.long_context_llm = llm_builder(llm_name=llm, openai_api_key=openai_api_key, long_ver=True, base_url=base_url)
         del openai_api_key
         self.token_counter = partial(token_counter, llm=llm, tokenizer=getattr(self.llm, 'tokenizer', None))
+
+        self.env = env(**self.tasks[self.task_idx]['env_kwargs'], max_steps=self.max_steps)
+        self.env.reset()
+        self.task = self.tasks[self.task_idx]['task']
 
         # Update dynamic components first to initialize system_instruction
         self.update_dynamic_prompt_components()
@@ -83,9 +78,12 @@ class ReactAgent(BaseAgent):
             human_instruction_kwargs=self.human_instruction_kwargs
         )
 
-        # build base prompt
-        self._build_agent_prompt()
+        # Now safe to reset and build prompt
+        self.reset()
+        self.truncated, self.reward, self.terminated = False, False, False
+        self.print_message = partial(print_message, testing=testing)
 
+        self.success, self.fail, self.halted = 0, 0, 0
         self.long_pass = None
 
     def is_success(self) -> bool:
