@@ -81,6 +81,14 @@ Add `testing=true` to any command to run without OpenAI API calls (for developme
 - Core methods: `setup_documents()`, `build_query_vectors()`, `create_filtered_vectorstore()`, `retrieve_topk_documents()`
 - Supports multiple retrieval strategies: task_similarity, thought_similarity, rotation, etc.
 
+**Modular Prompt Construction System (`constructor/`)**:
+- `BaseConstructor` (base.py): Abstract base class for prompt construction
+- `ExpelConstructor` (expel_constructor.py): Complete prompt building implementation for ExpeL framework
+- Core methods: `build_system_prompt()`, `build_fewshot_prompt()`, `build_rules_prompt()`, `build_task_prompt()`
+- Advanced methods: `build_complete_prompt()`, `build_complete_prompt_with_insertions()`, `update_prompt_with_fewshots()`
+- Utility methods: `collapse_prompts()`, `remove_task_suffix()`, `extract_fewshots_from_prompt()`, `build_incremental_prompt()`
+- Handles complete prompt construction pipeline from system messages to final LLM input
+
 **Environment Support (`envs/`)**:
 - ALFWorld: Interactive text-based household tasks
 - WebShop: E-commerce environment (requires separate server setup)
@@ -112,6 +120,7 @@ Add `testing=true` to any command to run without OpenAI API calls (for developme
 3. **Evaluation**:
    - ExpelStorage loads insights via `load_insights()` method
    - ExpelRetrieval system performs FAISS-based similarity search for relevant experiences
+   - ExpelConstructor builds complete prompts integrating insights, dynamic few-shots, and current context
    - Uses extracted insights and retrieved experiences for improved performance
    - ExpelStorage saves results via `save_evaluation_results()` method
 
@@ -139,6 +148,13 @@ Uses Hydra for configuration management:
 - FAISS-based vector similarity search
 - Multiple retrieval strategies: task_similarity, thought_similarity, rotation, etc.
 - Dynamic few-shot example selection based on current context
+
+**ExpelConstructor handles prompt construction**:
+- Complete prompt building pipeline from static templates to final LLM input
+- Supports all three phases: training experience gathering, insights extraction, and evaluation
+- Dynamic integration of rules/insights during evaluation phase
+- Flexible content insertion system for complex prompt requirements
+- Handles few-shot replacement, message collapsing, and incremental prompt building
 
 ## Environment-Specific Setup
 
@@ -176,7 +192,69 @@ alfworld-download
 - `run_name`: Unique identifier for the current run
 - `load_run_name`: Name of previous run to load data from
 
-### Storage and Retrieval Configuration
-- All modular components (ExpelDataset, ExpelStorage, ExpelRetrieval) are automatically initialized
+### Storage, Retrieval, and Constructor Configuration
+- All modular components (ExpelDataset, ExpelStorage, ExpelRetrieval, ExpelConstructor) are automatically initialized
 - Storage paths are automatically managed based on benchmark and agent type
 - Retrieval system is seamlessly integrated into the agent's decision-making process
+- Constructor system handles all prompt building with automatic benchmark-specific template selection
+
+## Modular Architecture Design
+
+### Four-Pillar Modular System
+The ExpeL framework now features a comprehensive four-pillar modular architecture:
+
+**1. Dataset Management (`ExpelDataset`)**:
+- Handles task loading and data range configuration
+- Unified interface across all benchmark environments
+- Configurable training/evaluation splits
+
+**2. Data Persistence (`ExpelStorage`)**:
+- Complete three-phase data transfer chain management
+- Experience → Insights → Evaluation data flow
+- Automatic path management and checkpoint support
+
+**3. Experience Retrieval (`ExpelRetrieval`)**:
+- FAISS-based vector similarity search
+- Dynamic few-shot selection based on current context
+- Multiple retrieval strategies for different scenarios
+
+**4. Prompt Construction (`ExpelConstructor`)**:
+- Complete prompt building pipeline
+- Integration of static templates, dynamic content, and contextual information
+- Support for all learning phases with automatic rule/insight injection
+
+### Prompt Construction Pipeline
+The ExpelConstructor manages the complete prompt construction process:
+
+**Core Building Blocks**:
+- System message construction with agent identity and instructions
+- Few-shot example integration with instruction templates
+- Rules/insights injection during evaluation phase
+- Task description formatting with benchmark-specific cleaning
+
+**Advanced Features**:
+- Dynamic few-shot replacement using retrieval system output
+- Message collapsing for optimal prompt structure
+- Incremental prompt building for conversation contexts
+- Flexible content insertion for complex prompt requirements
+
+**Dependency Management**:
+```
+Static Config → Constructor Initialization
+↓
+Training Phase 1: Constructor + Static Templates → Experience Data
+↓
+Training Phase 2: Constructor + Experience Data → Insights/Rules
+↓
+Evaluation Phase: Constructor + Insights + Dynamic Retrieval → Final Performance
+```
+
+### Integration Flow
+All four modular components work together seamlessly:
+
+1. **ExpelDataset** provides task data with configured ranges
+2. **ExpelStorage** manages data persistence across all three phases
+3. **ExpelRetrieval** dynamically selects relevant few-shot examples
+4. **ExpelConstructor** builds complete prompts integrating all components
+
+This modular design maintains complete backward compatibility while providing clean separation of concerns and enhanced maintainability.

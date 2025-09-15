@@ -50,6 +50,10 @@ class ExpelConstructor(BaseConstructor):
         if self.rule_template is None and self.benchmark_name in RULE_TEMPLATE:
             self.rule_template = RULE_TEMPLATE[self.benchmark_name]
 
+        # Initialize conversation management
+        self.conversation_history = []
+        self.base_prompt_length = 0
+
     def build_system_prompt(self) -> List[ChatMessage]:
         """
         Build system prompt messages.
@@ -309,3 +313,292 @@ class ExpelConstructor(BaseConstructor):
         complete_prompt = deepcopy(base_prompt)
         complete_prompt.extend(conversation_history)
         return self.collapse_prompts(complete_prompt)
+
+    # ==================== Conversation Management Methods ====================
+
+    def initialize_conversation(self,
+                              fewshots: List[str],
+                              task: str,
+                              rules: Optional[str] = None,
+                              is_training: bool = True,
+                              no_rules: bool = False) -> None:
+        """
+        Initialize conversation with base prompt structure.
+
+        This method sets up the initial conversation state with system messages,
+        few-shots, rules, and task descriptions.
+        """
+        base_prompt = self.build_complete_prompt(
+            fewshots=fewshots,
+            task=task,
+            rules=rules,
+            is_training=is_training,
+            no_rules=no_rules
+        )
+
+        self.conversation_history = base_prompt
+        self.base_prompt_length = len(base_prompt)
+
+    def add_conversation_turn(self, message: ChatMessage) -> None:
+        """
+        Add a conversation turn (user message or AI response).
+
+        This method appends a new message to the conversation history
+        and maintains the conversation state.
+        """
+        self.conversation_history.append(message)
+
+    def update_dynamic_components(self,
+                                update_callback: Optional[Callable] = None,
+                                **update_kwargs) -> None:
+        """
+        Update dynamic components in the conversation.
+
+        This method allows for dynamic updates of conversation components
+        such as few-shots, system instructions, etc. through a callback.
+
+        Args:
+            update_callback: Function to call for dynamic updates
+            **update_kwargs: Additional arguments for the update callback
+        """
+        if update_callback is not None:
+            # Store conversation turns after base prompt
+            conversation_turns = self.conversation_history[self.base_prompt_length:]
+
+            # Call update callback (typically agent's update_dynamic_prompt_components)
+            update_callback(**update_kwargs)
+
+            # Rebuild base prompt with updated components
+            # Note: fewshots and other components should be updated by callback
+            if hasattr(self, '_last_build_params'):
+                base_prompt = self.build_complete_prompt(**self._last_build_params)
+                self.conversation_history = base_prompt + conversation_turns
+                self.base_prompt_length = len(base_prompt)
+
+    def prepare_llm_input(self, collapse_messages: bool = True) -> List[ChatMessage]:
+        """
+        Prepare the final prompt for LLM input.
+
+        This method processes the conversation history and returns the
+        final prompt structure ready for LLM invocation.
+        """
+        if collapse_messages:
+            return self.collapse_prompts(self.conversation_history)
+        return self.conversation_history
+
+    def reset_conversation(self) -> None:
+        """
+        Reset the conversation history to empty state.
+
+        This method clears the conversation history and resets
+        the conversation management state.
+        """
+        self.conversation_history = []
+        self.base_prompt_length = 0
+
+    def get_conversation_length(self) -> int:
+        """
+        Get the total length of the conversation history.
+
+        Returns the number of messages in the current conversation.
+        """
+        return len(self.conversation_history)
+
+    def get_conversation_turns_only(self) -> List[ChatMessage]:
+        """
+        Get only the conversation turns (excluding base prompt).
+
+        Returns only the dynamic conversation parts without the
+        initial system/few-shot/task setup.
+        """
+        return self.conversation_history[self.base_prompt_length:]
+
+    def rebuild_with_updated_fewshots(self,
+                                    old_fewshots: Union[List[str], str],
+                                    new_fewshots: Union[List[str], str]) -> None:
+        """
+        Rebuild conversation with updated few-shot examples.
+
+        This method updates the few-shot examples in the base prompt
+        while preserving the conversation turns.
+        """
+        # Store conversation turns
+        conversation_turns = self.get_conversation_turns_only()
+
+        # Update base prompt with new fewshots
+        base_updated = self.update_prompt_with_fewshots(
+            self.conversation_history[:self.base_prompt_length],
+            old_fewshots,
+            new_fewshots
+        )
+
+        # Rebuild conversation history
+        self.conversation_history = base_updated + conversation_turns
+        self.base_prompt_length = len(base_updated)
+
+    def store_build_parameters(self, **params) -> None:
+        """
+        Store the parameters used for building the base prompt.
+
+        This allows for rebuilding the base prompt when dynamic updates occur.
+        """
+        self._last_build_params = params
+
+    # ==================== Advanced Conversation Management ====================
+
+    def prompt_agent_for_llm(self,
+                           llm_callable: Callable,
+                           long_context_llm_callable: Callable,
+                           update_callback: Optional[Callable] = None,
+                           testing: bool = False,
+                           print_callback: Optional[Callable] = None,
+                           token_counter: Optional[Callable] = None,
+                           long_pass: Optional[bool] = None) -> str:
+        """
+        Complete agent prompting workflow for LLM interaction.
+
+        This method handles the full workflow: dynamic updates → prompt preparation → LLM call.
+        """
+        # Update dynamic components if callback provided
+        if update_callback is not None:
+            self.update_dynamic_components(update_callback=update_callback)
+
+        # Prepare final prompt
+        prompt_history = self.prepare_llm_input(collapse_messages=True)
+
+        # Handle testing mode
+        if testing:
+            if print_callback:
+                print('###################################')
+                for prompt in prompt_history:
+                    print_callback(prompt, token_counter)
+            return input()
+
+        # Call LLM with error handling
+        try:
+            return llm_callable(prompt_history, stop=['\n', '\n\n'])
+        except Exception as e:  # Catch BadRequestError and others
+            if 'BadRequest' in str(type(e)):
+                while long_pass is None:
+                    res = input('Changing to long context LLM. Press Enter to continue.\n')
+                    if res == 'pass':
+                        long_pass = True
+                    elif res != '':
+                        continue
+                    break
+                return long_context_llm_callable(prompt_history, stop=['\n', '\n\n'])
+            else:
+                raise e
+
+    def handle_agent_step(self,
+                        llm_parser: Callable,
+                        llm_callable: Callable,
+                        long_context_llm_callable: Callable,
+                        current_step: int,
+                        update_callback: Optional[Callable] = None,
+                        testing: bool = False,
+                        print_callback: Optional[Callable] = None,
+                        token_counter: Optional[Callable] = None,
+                        long_pass: Optional[bool] = None) -> tuple:
+        """
+        Handle a complete agent step including LLM interaction and response parsing.
+
+        Returns: (message, message_type, others) tuple from llm_parser
+        """
+        # Get LLM response
+        llm_response = self.prompt_agent_for_llm(
+            llm_callable=llm_callable,
+            long_context_llm_callable=long_context_llm_callable,
+            update_callback=update_callback,
+            testing=testing,
+            print_callback=print_callback,
+            token_counter=token_counter,
+            long_pass=long_pass
+        )
+
+        # Parse response
+        message, message_type, others = llm_parser(llm_response, current_step, False)
+
+        # Add parsed message to conversation
+        self.add_conversation_turn(message)
+
+        return message, message_type, others
+
+    def handle_observation(self,
+                         observation_message: Any,
+                         operation: str = 'append',
+                         last_observation_content: Optional[str] = None) -> None:
+        """
+        Handle environment observation in the conversation.
+
+        Args:
+            observation_message: The observation message to add
+            operation: 'append' or 'replace' operation
+            last_observation_content: Content to replace (for 'replace' operation)
+        """
+        if operation == 'append':
+            self.add_conversation_turn(observation_message)
+        elif operation == 'replace' and last_observation_content:
+            # Handle replacement in conversation history
+            for message in self.conversation_history:
+                if last_observation_content in message.content:
+                    message.content = message.content.replace(
+                        last_observation_content,
+                        observation_message.content
+                    )
+                    break
+
+    def get_prompt_history_for_compatibility(self) -> List[ChatMessage]:
+        """
+        Get conversation history for backward compatibility.
+
+        Returns the current conversation history for agents that still
+        reference prompt_history directly.
+        """
+        return self.conversation_history
+
+    def update_fewshots_dynamically(self,
+                                  old_fewshots: Union[List[str], str],
+                                  new_fewshots: Union[List[str], str]) -> None:
+        """
+        Update few-shot examples dynamically while preserving conversation.
+
+        This method is specifically for ExpelAgent's dynamic few-shot replacement.
+        """
+        self.rebuild_with_updated_fewshots(old_fewshots, new_fewshots)
+
+    def insert_rules_or_insights(self, rules: str) -> None:
+        """
+        Insert rules or insights into the conversation base prompt.
+
+        This method rebuilds the base prompt with rules included.
+        """
+        if hasattr(self, '_last_build_params'):
+            # Store conversation turns
+            conversation_turns = self.get_conversation_turns_only()
+
+            # Update build parameters with rules
+            build_params = self._last_build_params.copy()
+            build_params['rules'] = rules
+            build_params['is_training'] = False
+            build_params['no_rules'] = False
+
+            # Rebuild base prompt with rules
+            base_prompt = self.build_complete_prompt(**build_params)
+
+            # Update conversation
+            self.conversation_history = base_prompt + conversation_turns
+            self.base_prompt_length = len(base_prompt)
+
+    def get_conversation_statistics(self) -> dict:
+        """
+        Get statistics about the current conversation.
+
+        Returns information useful for debugging and monitoring.
+        """
+        return {
+            'total_messages': len(self.conversation_history),
+            'base_prompt_length': self.base_prompt_length,
+            'conversation_turns': len(self.get_conversation_turns_only()),
+            'last_build_params': getattr(self, '_last_build_params', None)
+        }

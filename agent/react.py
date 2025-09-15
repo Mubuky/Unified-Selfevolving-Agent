@@ -94,16 +94,35 @@ class ReactAgent(BaseAgent):
             self.step()
 
     def step(self) -> None:
-        message, message_type, others = self.llm_parser(self.prompt_agent(), self.curr_step, False)
-        self.prompt_history.append(message)
+        # Use constructor's complete step handling
+        message, message_type, others = self.constructor.handle_agent_step(
+            llm_parser=self.llm_parser,
+            llm_callable=self.llm,
+            long_context_llm_callable=self.long_context_llm,
+            current_step=self.curr_step,
+            update_callback=self.update_dynamic_prompt_components,
+            testing=self.testing,
+            print_callback=self.print_message,
+            token_counter=self.token_counter,
+            long_pass=getattr(self, 'long_pass', None)
+        )
         self.print_message(message)
 
         thought_num = 1
         # loops while in thinking mode
         while message_type == 'thought':
             thought_num += 1
-            message, message_type, others = self.llm_parser(self.prompt_agent(), self.curr_step, False)
-            self.prompt_history.append(message)
+            message, message_type, others = self.constructor.handle_agent_step(
+                llm_parser=self.llm_parser,
+                llm_callable=self.llm,
+                long_context_llm_callable=self.long_context_llm,
+                current_step=self.curr_step,
+                update_callback=self.update_dynamic_prompt_components,
+                testing=self.testing,
+                print_callback=self.print_message,
+                token_counter=self.token_counter,
+                long_pass=getattr(self, 'long_pass', None)
+            )
             self.print_message(message)
 
             if thought_num > 2:
@@ -116,43 +135,43 @@ class ReactAgent(BaseAgent):
         if others['action'] == 'N/A' and thought_num > 2:
             observation = "You are thinking too many times without taking action."
         observation_history, operation = self.observation_formatter(observation, step=self.curr_step)
-        if operation == 'append':
-            self.prompt_history.append(observation_history)
-        elif operation == 'replace':
-            for message in self.prompt_history:
-                if self._last_observation_history.content in message.content:
-                    message.content = message.content.replace(self._last_observation_history.content, observation_history.content)
-                    break
-            self._last_observation_history = deepcopy(observation_history)        
+
+        # Use constructor's observation handling
+        last_observation_content = self._last_observation_history.content if self._last_observation_history else None
+        self.constructor.handle_observation(
+            observation_message=observation_history,
+            operation=operation,
+            last_observation_content=last_observation_content
+        )
+
+        if operation == 'replace':
+            self._last_observation_history = deepcopy(observation_history)
+
         self.print_message(observation_history)
 
         BaseAgent.after_step(self)
 
-        self.prompt_history = self.collapse_prompts(self.prompt_history)
+        # Update prompt_history reference for compatibility
+        self.prompt_history = self.constructor.get_prompt_history_for_compatibility()
 
         self.curr_step += 1
 
     def prompt_agent(self) -> str:
-        self.prompt_history = self.collapse_prompts(self.prompt_history)
-        self.update_dynamic_prompt_components()
-        prompt_history = self.collapse_prompts(self.prompt_history)
-        if self.testing:
-            print('###################################')
-            for prompt in prompt_history:
-                self.print_message(prompt, self.token_counter)
-            return input()
-        try:
-            return self.llm(prompt_history, stop=['\n', '\n\n'])
-        except openai.BadRequestError:
-            while self.long_pass is None:
-                res = input('Changing to long context LLM. Press Enter to continue.\n')
-                if res == 'pass':
-                    self.long_pass = True
-                elif res != '':
-                    continue
-                break
+        # Use constructor's complete prompting workflow
+        response = self.constructor.prompt_agent_for_llm(
+            llm_callable=self.llm,
+            long_context_llm_callable=self.long_context_llm,
+            update_callback=self.update_dynamic_prompt_components,
+            testing=self.testing,
+            print_callback=self.print_message,
+            token_counter=self.token_counter,
+            long_pass=getattr(self, 'long_pass', None)
+        )
 
-            return self.long_context_llm(prompt_history, stop=['\n', '\n\n'])
+        # Update prompt_history reference for compatibility
+        self.prompt_history = self.constructor.get_prompt_history_for_compatibility()
+
+        return response
 
     def _build_fewshot_prompt(
         self,
@@ -172,33 +191,45 @@ class ReactAgent(BaseAgent):
             )
 
     def _build_agent_prompt(self) -> None:
-        # Build system and fewshot prompts first
-        system_messages = self.constructor.build_system_prompt()
-        fewshot_messages = self.constructor.build_fewshot_prompt(self.fewshots)
+        # Store build parameters for dynamic updates
+        build_params = {
+            'fewshots': self.fewshots,
+            'task': self.task,
+            'is_training': getattr(self, 'training', True),
+            'no_rules': getattr(self, 'no_rules', False)
+        }
 
-        self.prompt_history = system_messages + fewshot_messages
-        self.prompt_history = self.constructor.collapse_prompts(self.prompt_history)
-        self.log_idx = len(self.prompt_history)
+        # Add rules parameter for ExpelAgent
+        if hasattr(self, 'rules'):
+            build_params['rules'] = getattr(self, 'rules', None)
 
-        # Insert before task (for rules in ExpelAgent)
-        self.insert_before_task_prompt()
+        self.constructor.store_build_parameters(**build_params)
 
-        # Add task description
-        task_messages = self.constructor.build_task_prompt(self.constructor.remove_task_suffix(self.task))
-        self.prompt_history.extend(task_messages)
+        # Use constructor to initialize conversation with complete prompt
+        self.constructor.initialize_conversation(**build_params)
 
-        # Insert after task
-        self.insert_after_task_prompt()
+        # For compatibility, maintain prompt_history as reference to constructor's conversation
+        self.prompt_history = self.constructor.conversation_history
+        self.log_idx = self.constructor.base_prompt_length
 
-        # Final collapse
-        self.prompt_history = self.constructor.collapse_prompts(self.prompt_history)
+        # Handle insertion points (for ExpelAgent rules, etc.)
+        self._handle_prompt_insertions()
+
         self.pretask_idx = len(self.prompt_history)
         return self.prompt_history
 
-    def reset(self, *args, **kwargs) -> None:
-        self.prompt_history = []
-        self.update_dynamic_prompt_components(reset=True)
+    def _handle_prompt_insertions(self) -> None:
+        """
+        Handle prompt insertion points for subclasses.
 
+        This method can be overridden by subclasses to insert additional content
+        using the constructor's flexible insertion system.
+        """
+        # Default implementation does nothing
+        # Subclasses like ExpelAgent can override to add rules/insights
+        pass
+
+    def reset(self, *args, **kwargs) -> None:
         # Initialize constructor after system_instruction is set
         if self.constructor is None:
             self.constructor = ExpelConstructor(
@@ -210,6 +241,11 @@ class ReactAgent(BaseAgent):
                 human_instruction_kwargs=self.human_instruction_kwargs
             )
 
+        # Reset conversation through constructor
+        self.constructor.reset_conversation()
+        self.prompt_history = []
+
+        self.update_dynamic_prompt_components(reset=True)
         self.curr_step = 1
         self._build_agent_prompt()
 
@@ -247,7 +283,28 @@ class ReactAgent(BaseAgent):
 
     def collapse_prompts(self, prompt_history: List[ChatMessage]) -> List[ChatMessage]:
         """Use constructor's collapse_prompts method"""
-        return self.constructor.collapse_prompts(prompt_history)
+        if self.constructor:
+            return self.constructor.collapse_prompts(prompt_history)
+        else:
+            # Fallback for initialization phase
+            if not prompt_history:
+                return []
+
+            new_prompt_history = []
+            scratch_pad = prompt_history[0].content
+            last_message_type = type(prompt_history[0])
+
+            for message in prompt_history[1:]:
+                current_message_type = type(message)
+                if current_message_type == last_message_type:
+                    scratch_pad += '\n' + message.content
+                else:
+                    new_prompt_history.append(last_message_type(content=scratch_pad))
+                    scratch_pad = message.content
+                    last_message_type = current_message_type
+
+            new_prompt_history.append(last_message_type(content=scratch_pad))
+            return new_prompt_history
 
     def update_dynamic_prompt_components(self, reset: bool = False):
         #####################

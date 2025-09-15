@@ -428,10 +428,9 @@ class ExpelAgent(ReflectAgent):
         # if training then reflect
         if self.training:
             return ReflectAgent.insert_before_task_prompt(self)
-        # if eval, add the manual
+        # if eval, add the manual through constructor
         if not self.no_rules and hasattr(self, 'rules'):
-            rules_messages = self.constructor.build_rules_prompt(self.rules)
-            self.prompt_history.extend(rules_messages)
+            self.constructor.insert_rules_or_insights(self.rules)
 
     def insert_after_task_prompt(self):
         pass
@@ -560,10 +559,11 @@ class ExpelAgent(ReflectAgent):
         else:
             raise NotImplementedError
 
-        # Update prompt history with new fewshots using constructor
-        self.prompt_history = self.constructor.update_prompt_with_fewshots(
-            self.prompt_history, old_fewshots, self.fewshots
-        )
+        # Update fewshots dynamically through constructor
+        self.constructor.update_fewshots_dynamically(old_fewshots, self.fewshots)
+
+        # Update prompt_history reference for compatibility
+        self.prompt_history = self.constructor.get_prompt_history_for_compatibility()
 
 # Utils function
 def parse_rules(llm_text):
