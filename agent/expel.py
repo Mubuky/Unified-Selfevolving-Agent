@@ -432,9 +432,6 @@ class ExpelAgent(ReflectAgent):
         if not self.no_rules and hasattr(self, 'rules'):
             self.constructor.insert_rules_or_insights(self.rules)
 
-    def insert_after_task_prompt(self):
-        pass
-
     def after_step(self) -> None:
         pass
 
@@ -448,11 +445,6 @@ class ExpelAgent(ReflectAgent):
             all_fewshots=self.all_fewshots,
             env=self.env
         )
-
-        # Transfer data from retrieval system to agent (for compatibility)
-        self.docs = self.retrieval.docs
-        self.combined_history = self.retrieval.combined_history
-        self.keys2task = self.retrieval.keys2task
 
     def update_dynamic_prompt_components(self, reset: bool = False):
         """

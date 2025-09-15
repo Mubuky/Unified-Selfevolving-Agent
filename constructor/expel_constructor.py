@@ -220,26 +220,6 @@ class ExpelConstructor(BaseConstructor):
 
         return updated_prompt
 
-    def extract_fewshots_from_prompt(self, prompt_history: List[ChatMessage]) -> Optional[str]:
-        """
-        Extract current few-shot examples from prompt history.
-
-        This method searches for and extracts the current few-shot examples
-        from the prompt history for replacement purposes.
-        """
-        for message in prompt_history:
-            if "(END OF EXAMPLES)" in message.content:
-                # Extract content between instruction and (END OF EXAMPLES)
-                content = message.content
-                if '\n\n' in content:
-                    parts = content.split('\n\n')
-                    for i, part in enumerate(parts):
-                        if "(END OF EXAMPLES)" in part:
-                            if i > 0:
-                                # Return the part before (END OF EXAMPLES)
-                                fewshots_part = '\n\n'.join(parts[1:i])
-                                return fewshots_part
-        return None
 
     def remove_task_suffix(self, task: str) -> str:
         """
@@ -300,19 +280,6 @@ class ExpelConstructor(BaseConstructor):
         prompt_history = self.collapse_prompts(prompt_history)
 
         return prompt_history
-
-    def build_incremental_prompt(self,
-                                 base_prompt: List[ChatMessage],
-                                 conversation_history: List[ChatMessage]) -> List[ChatMessage]:
-        """
-        Build incremental prompt by combining base prompt with conversation history.
-
-        This method creates the complete prompt for LLM interaction by combining
-        the base prompt structure with ongoing conversation history.
-        """
-        complete_prompt = deepcopy(base_prompt)
-        complete_prompt.extend(conversation_history)
-        return self.collapse_prompts(complete_prompt)
 
     # ==================== Conversation Management Methods ====================
 

@@ -212,22 +212,8 @@ class ReactAgent(BaseAgent):
         self.prompt_history = self.constructor.conversation_history
         self.log_idx = self.constructor.base_prompt_length
 
-        # Handle insertion points (for ExpelAgent rules, etc.)
-        self._handle_prompt_insertions()
-
         self.pretask_idx = len(self.prompt_history)
         return self.prompt_history
-
-    def _handle_prompt_insertions(self) -> None:
-        """
-        Handle prompt insertion points for subclasses.
-
-        This method can be overridden by subclasses to insert additional content
-        using the constructor's flexible insertion system.
-        """
-        # Default implementation does nothing
-        # Subclasses like ExpelAgent can override to add rules/insights
-        pass
 
     def reset(self, *args, **kwargs) -> None:
         # Initialize constructor after system_instruction is set
@@ -248,9 +234,6 @@ class ReactAgent(BaseAgent):
         self.update_dynamic_prompt_components(reset=True)
         self.curr_step = 1
         self._build_agent_prompt()
-
-    def insert_after_task_prompt(self) -> None:
-        return
 
     def job_not_done(self) -> bool:
         return self.task_idx < len(self.tasks)

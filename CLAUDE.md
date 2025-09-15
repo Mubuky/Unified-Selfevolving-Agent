@@ -81,13 +81,16 @@ Add `testing=true` to any command to run without OpenAI API calls (for developme
 - Core methods: `setup_documents()`, `build_query_vectors()`, `create_filtered_vectorstore()`, `retrieve_topk_documents()`
 - Supports multiple retrieval strategies: task_similarity, thought_similarity, rotation, etc.
 
-**Modular Prompt Construction System (`constructor/`)**:
+**Modular Prompt Construction & Conversation Management System (`constructor/`)**:
 - `BaseConstructor` (base.py): Abstract base class for prompt construction
-- `ExpelConstructor` (expel_constructor.py): Complete prompt building implementation for ExpeL framework
-- Core methods: `build_system_prompt()`, `build_fewshot_prompt()`, `build_rules_prompt()`, `build_task_prompt()`
-- Advanced methods: `build_complete_prompt()`, `build_complete_prompt_with_insertions()`, `update_prompt_with_fewshots()`
-- Utility methods: `collapse_prompts()`, `remove_task_suffix()`, `extract_fewshots_from_prompt()`, `build_incremental_prompt()`
-- Handles complete prompt construction pipeline from system messages to final LLM input
+- `ExpelConstructor` (expel_constructor.py): Complete prompt building and conversation management for ExpeL framework
+- **Core Prompt Building**: `build_system_prompt()`, `build_fewshot_prompt()`, `build_rules_prompt()`, `build_task_prompt()`
+- **Advanced Construction**: `build_complete_prompt()`, `build_complete_prompt_with_insertions()`, `update_prompt_with_fewshots()`
+- **Conversation Management**: `initialize_conversation()`, `add_conversation_turn()`, `reset_conversation()`, `handle_observation()`
+- **Dynamic Updates**: `update_dynamic_components()`, `update_fewshots_dynamically()`, `insert_rules_or_insights()`
+- **LLM Integration**: `prompt_agent_for_llm()`, `handle_agent_step()`, `prepare_llm_input()`
+- **Utility Methods**: `collapse_prompts()`, `remove_task_suffix()`, `get_conversation_statistics()`
+- Handles complete pipeline from initial prompt construction to ongoing conversation management and LLM interaction
 
 **Environment Support (`envs/`)**:
 - ALFWorld: Interactive text-based household tasks
@@ -149,12 +152,14 @@ Uses Hydra for configuration management:
 - Multiple retrieval strategies: task_similarity, thought_similarity, rotation, etc.
 - Dynamic few-shot example selection based on current context
 
-**ExpelConstructor handles prompt construction**:
+**ExpelConstructor handles prompt construction and conversation management**:
 - Complete prompt building pipeline from static templates to final LLM input
+- Full conversation state management with base prompt and dynamic turn tracking
 - Supports all three phases: training experience gathering, insights extraction, and evaluation
-- Dynamic integration of rules/insights during evaluation phase
-- Flexible content insertion system for complex prompt requirements
-- Handles few-shot replacement, message collapsing, and incremental prompt building
+- Dynamic integration of rules/insights during evaluation phase with conversation preservation
+- Advanced LLM interaction workflow including error handling and retry mechanisms
+- Unified few-shot replacement, message collapsing, and conversation state management
+- Direct LLM integration with testing mode support and long context fallback
 
 ## Environment-Specific Setup
 
@@ -218,35 +223,47 @@ The ExpeL framework now features a comprehensive four-pillar modular architectur
 - Dynamic few-shot selection based on current context
 - Multiple retrieval strategies for different scenarios
 
-**4. Prompt Construction (`ExpelConstructor`)**:
-- Complete prompt building pipeline
+**4. Prompt Construction & Conversation Management (`ExpelConstructor`)**:
+- Complete prompt building and conversation management pipeline
 - Integration of static templates, dynamic content, and contextual information
 - Support for all learning phases with automatic rule/insight injection
+- Full conversation state management with LLM interaction workflow
+- Real-time dynamic updates while preserving conversation continuity
 
-### Prompt Construction Pipeline
-The ExpelConstructor manages the complete prompt construction process:
+### Prompt Construction & Conversation Management Pipeline
+The ExpelConstructor manages the complete prompt construction and conversation management process:
 
 **Core Building Blocks**:
 - System message construction with agent identity and instructions
 - Few-shot example integration with instruction templates
 - Rules/insights injection during evaluation phase
 - Task description formatting with benchmark-specific cleaning
+- Conversation state initialization and turn-by-turn management
 
 **Advanced Features**:
 - Dynamic few-shot replacement using retrieval system output
 - Message collapsing for optimal prompt structure
 - Incremental prompt building for conversation contexts
 - Flexible content insertion for complex prompt requirements
+- Full conversation history tracking with base prompt separation
+- Direct LLM interaction with error handling and retry mechanisms
+
+**Conversation Management**:
+- **Initialization**: `initialize_conversation()` sets up base prompt structure
+- **Turn Management**: `add_conversation_turn()` maintains conversation flow
+- **Dynamic Updates**: Real-time few-shot and rules insertion while preserving conversation
+- **LLM Integration**: `prompt_agent_for_llm()` handles complete interaction workflow
+- **State Tracking**: Separation of base prompt and dynamic conversation turns
 
 **Dependency Management**:
 ```
-Static Config → Constructor Initialization
+Static Config → Constructor Initialization → Conversation Setup
 ↓
-Training Phase 1: Constructor + Static Templates → Experience Data
+Training Phase 1: Constructor + Conversation Management → Experience Data
 ↓
-Training Phase 2: Constructor + Experience Data → Insights/Rules
+Training Phase 2: Constructor + Experience Data + Conversation → Insights/Rules
 ↓
-Evaluation Phase: Constructor + Insights + Dynamic Retrieval → Final Performance
+Evaluation Phase: Constructor + Insights + Dynamic Retrieval + Conversation → Final Performance
 ```
 
 ### Integration Flow
@@ -255,6 +272,44 @@ All four modular components work together seamlessly:
 1. **ExpelDataset** provides task data with configured ranges
 2. **ExpelStorage** manages data persistence across all three phases
 3. **ExpelRetrieval** dynamically selects relevant few-shot examples
-4. **ExpelConstructor** builds complete prompts integrating all components
+4. **ExpelConstructor** manages complete prompt construction and conversation flow integrating all components
+
+### Agent Simplification Through Constructor Integration
+
+The modular design significantly simplifies agent implementation:
+
+**Before Modularization**:
+```python
+# Agent classes contained complex prompt management logic
+def step(self):
+    # Complex prompt history management
+    self.prompt_history.append(message)
+    self.prompt_history = self.collapse_prompts(self.prompt_history)
+    # Manual LLM calling with error handling
+    try:
+        response = self.llm(prompt_history, stop=['\n', '\n\n'])
+    except openai.BadRequestError:
+        # Complex error handling...
+```
+
+**After Modularization**:
+```python
+# Agent classes use clean constructor interface
+def step(self):
+    # Single constructor call handles everything
+    message, message_type, others = self.constructor.handle_agent_step(
+        llm_parser=self.llm_parser,
+        llm_callable=self.llm,
+        # ... other parameters
+    )
+    # Constructor manages all conversation state automatically
+```
+
+**Key Benefits**:
+- **Zero Code Duplication**: All prompt logic centralized in ExpelConstructor
+- **Automatic State Management**: Conversation history maintained automatically
+- **Error Handling**: LLM retry logic and long context fallback built-in
+- **Dynamic Updates**: Few-shot replacement and rules insertion seamlessly integrated
+- **Testing Support**: Built-in testing mode with prompt debugging capabilities
 
 This modular design maintains complete backward compatibility while providing clean separation of concerns and enhanced maintainability.
