@@ -15,6 +15,7 @@ from agent import ReflectAgent, ReactAgent
 from agent.reflect import Count
 from utils import random_divide_list, save_trajectories_log, get_env_name_from_task
 from memory import Trajectory
+from retrieval import ExpelRetrieval
 
 from copy import deepcopy
 
@@ -70,6 +71,23 @@ class ExpelAgent(ReflectAgent):
         super().__init__(benchmark_name=benchmark_name, *args, **kwargs)
         self.idx2task = {idx: task['task'] for idx, task in enumerate(self.tasks)}
         self.task2idx = {task['task']: idx for idx, task in enumerate(self.tasks)}
+
+        # Initialize retrieval system
+        self.retrieval = ExpelRetrieval(
+            embedder=self.embedder,
+            benchmark_name=self.benchmark_name,
+            fewshot_strategy=self.fewshot_strategy,
+            reranker=self.reranker,
+            buffer_retrieve_ratio=self.buffer_retrieve_ratio,
+            max_fewshot_tokens=self.max_fewshot_tokens,
+            num_fewshots=self.num_fewshots,
+            message_splitter=self.message_splitter,
+            identifier=self.identifier,
+            step_stripper=self.step_stripper,
+            message_step_splitter=self.message_step_splitter,
+            remove_task_suffix=self.remove_task_suffix,
+            token_counter=self.token_counter
+        )
 
     @property
     def training(self) -> bool:
@@ -419,165 +437,44 @@ class ExpelAgent(ReflectAgent):
         pass
 
     def setup_vectorstore(self) -> None:
-        self.keys2task = {'thought': {}, 'task': {}, 'step': {}, 'reflection': {}, 'action': {}}
-        self.docs = []
-        combined_history = dict(self.succeeded_trial_history)
-        if isinstance(self.all_fewshots, list):
-            for fewshot in self.all_fewshots:
-                if self.benchmark_name in ['hotpotqa', 'fever']:
-                    task = fewshot.split('\n')[0]
-                    trajectory = '\n'.join(fewshot.split('\n')[1:])
-                elif self.benchmark_name == 'webshop':
-                    task = '\n'.join(fewshot.split('\n')[:2])
-                    trajectory = '\n'.join(fewshot.split('\n')[2:])
-                cleaned_traj = Trajectory(
-                    task=self.remove_task_suffix(task),
-                    trajectory=trajectory,
-                    reflections=[],
-                    splitter=self.message_splitter,
-                    identifier=self.identifier,
-                    step_splitter=partial(
-                        self.message_step_splitter,
-                        stripper=self.step_stripper
-                    ),
-                )
-                combined_history.update({task: [cleaned_traj]})
-        elif isinstance(self.all_fewshots, dict):
-            fewshot_offset = 100000
-            for env_task, fewshots in self.all_fewshots.items():
-                for fewshot in fewshots:
-                    if self.benchmark_name in ['alfworld']:
-                        task = '\n'.join(fewshot.split('\n')[:3]) + '___' + str(fewshot_offset)
-                        trajectory = '\n'.join(fewshot.split('\n')[3:])
-                    cleaned_traj = Trajectory(
-                        task=self.remove_task_suffix(task),
-                        trajectory=trajectory,
-                        reflections=[],
-                        splitter=self.message_splitter,
-                        identifier=self.identifier,
-                        step_splitter=partial(
-                            self.message_step_splitter,
-                            stripper=self.step_stripper
-                        ),
-                    )
-                    combined_history.update({task: [cleaned_traj]})
-                    fewshot_offset += 1
-        for task in combined_history:
-            if combined_history[task] != []:
-                self.docs.append(Document(page_content=self.remove_task_suffix(task), metadata={'type': 'task', 'task': task, 'env_name': get_env_name_from_task(task, self.benchmark_name)}))
-            for i, traj in enumerate(combined_history[task]):
-                cleaned_traj = Trajectory(
-                    task=self.remove_task_suffix(task),
-                    trajectory=traj.trajectory,
-                    reflections=list(traj.reflections),
-                    splitter=self.message_splitter,
-                    identifier=self.identifier,
-                    step_splitter=partial(
-                        self.message_step_splitter,
-                        stripper=self.step_stripper
-                    ),
-                )
-                cleaned_thoughts: List[str] = cleaned_traj.thoughts
-                cleaned_steps: List[str] = cleaned_traj.steps
-                cleaned_reflections: List[str] = cleaned_traj.reflections
-                cleaned_actions: List[str] = cleaned_traj.actions
-                self.docs.extend([Document(page_content=action, metadata={'type': 'action', 'task': task, 'env_name': get_env_name_from_task(task, self.benchmark_name)}) for action in cleaned_actions])
-                self.docs.extend([Document(page_content=thought, metadata={'type': 'thought', 'task': task, 'env_name': get_env_name_from_task(task, self.benchmark_name)}) for thought in cleaned_thoughts])
-                self.docs.extend([Document(page_content=step, metadata={'type': 'step', 'task': task, 'env_name': get_env_name_from_task(task, self.benchmark_name)}) for step in cleaned_steps])
-                if cleaned_reflections != []:
-                    self.docs.extend([Document(page_content=reflection, metadata={'type': 'reflection', 'task': task, 'env_name': get_env_name_from_task(task, self.benchmark_name)}) for reflection in cleaned_reflections])
-                for thought in cleaned_thoughts:
-                    self.keys2task['thought'][thought] = (task, i)
-                for step in cleaned_steps:
-                    self.keys2task['step'][step] = (task, i)
-                for reflection in cleaned_reflections:
-                    self.keys2task['reflection'][reflection] = (task, i)
-                for action in cleaned_actions:
-                    self.keys2task['action'][action] = (task, i)
-        self.combined_history = combined_history
+        """
+        Setup vector store using the modularized retrieval system.
+        """
+        # Use retrieval system to setup documents
+        self.retrieval.setup_documents(
+            succeeded_trial_history=self.succeeded_trial_history,
+            all_fewshots=self.all_fewshots,
+            env=self.env
+        )
 
-    def update_dynamic_prompt_components(self, reset:bool = False):
+        # Transfer data from retrieval system to agent (for compatibility)
+        self.docs = self.retrieval.docs
+        self.combined_history = self.retrieval.combined_history
+        self.keys2task = self.retrieval.keys2task
+
+    def update_dynamic_prompt_components(self, reset: bool = False):
+        """
+        Update dynamic prompt components using the modularized retrieval system.
+        """
         if reset:
             ReactAgent.update_dynamic_prompt_components(self)
             return
-        # do not dynamically update during training
+
+        # Do not dynamically update during training
         if self.training or self.fewshot_strategy == 'none':
             return
+
         old_fewshots = '\n\n'.join(self.fewshots)
 
-        def filtered_vectorstore(fewshot_strategy: str, docs: List[Document]):
-            strat2filter = {
-                'task_similarity': 'task', 'step_similarity': 'step',
-                'reflection_similarity': 'reflection', 'thought_similarity': 'thought',
-                'action_similarity': 'action'
-            }
-            if fewshot_strategy == 'random':
-                subset_docs = list(filter(lambda doc: doc.metadata['type'] == strat2filter['task_similarity'] and doc.metadata['env_name'] == self.env.env_name, docs))
-            else:
-                subset_docs = list(filter(lambda doc: doc.metadata['type'] == strat2filter[fewshot_strategy] and doc.metadata['env_name'] == self.env.env_name, docs))
-            # adhoc filtering for webshop
-            if self.benchmark_name == 'webshop':
-                filtered_subset_docs = []
-                for doc in subset_docs:
-                    trajectory = self.combined_history[doc.metadata['task']][0].trajectory
-                    if 'Observation: Invalid action!' not in trajectory and \
-                        'think[]' not in trajectory and \
-                            len(trajectory.split('Observation: You have clicked'))>=3:
-                        filtered_subset_docs.append(doc)
-            else:
-                filtered_subset_docs = subset_docs
-
-            return FAISS.from_documents(filtered_subset_docs, self.embedder)
-
-        def topk_docs(queries: Dict[str, str], query_type: str):
-            # retrieve enough fewshots, filtering the ones that are too long
-            fewshot_docs = self.vectorstore.similarity_search(queries[query_type], k=self.num_fewshots*self.buffer_retrieve_ratio)
-            if self.fewshot_strategy == 'random':
-                random.shuffle(fewshot_docs)
-            fewshots = []
-            current_tasks = set()
-            def fewshot_doc_token_count(fewshot_doc):
-                return self.token_counter(self.combined_history[fewshot_doc.metadata['task']][0].trajectory)
-            # default no reranker if thought is empty
-            if self.reranker == 'none' or (self.reranker == 'thought' and queries['thought'] == ''):
-                fewshot_docs = list(fewshot_docs)
-            elif self.reranker == 'len':
-                fewshot_docs = list(sorted(fewshot_docs, key=fewshot_doc_token_count, reverse=True))
-            elif self.reranker == 'thought' and queries['thought'] != '':
-                fewshot_tasks = set([doc.metadata['task'] for doc in fewshot_docs])
-                subset_docs = list(filter(lambda doc: doc.metadata['type'] == 'thought' and doc.metadata['env_name'] == self.env.env_name and doc.metadata['task'] in fewshot_tasks, list(self.docs)))
-                fewshot_docs = sorted(subset_docs, key=lambda doc: cosine(self.embedder.embed_query(doc.page_content), self.embedder.embed_query(queries['thought'])))
-            elif self.reranker == 'task':
-                fewshot_tasks = set([doc.metadata['task'] for doc in fewshot_docs])
-                subset_docs = list(filter(lambda doc: doc.metadata['type'] == 'thought' and doc.metadata['env_name'] == self.env.env_name and doc.metadata['task'] in fewshot_tasks, list(self.docs)))
-                fewshot_docs = sorted(subset_docs, key=lambda doc: cosine(self.embedder.embed_query(doc.page_content), self.embedder.embed_query(queries['task'])))
-            else:
-                raise NotImplementedError
-            for fewshot_doc in fewshot_docs:
-                idx, shortest_fewshot = sorted(enumerate([traj.trajectory for traj in self.combined_history[fewshot_doc.metadata['task']]]), key=lambda x: len(x[1]))[0]
-
-                # if fewshot is using more than 1k tokens OR
-                # if the fewshot is the same as the current task OR
-                # if the fewshot is the same as one of the current fewshots, skip it
-                if self.token_counter(shortest_fewshot) > self.max_fewshot_tokens or \
-                    self.task == fewshot_doc.metadata['task'] or fewshot_doc.metadata['task'] in current_tasks:
-                    continue
-                fewshots.append(self.combined_history[fewshot_doc.metadata['task']][idx].task + '\n' + shortest_fewshot)
-
-                current_tasks.add(fewshot_doc.metadata['task'])
-                if len(fewshots) == self.num_fewshots:
-                    break
-
-            return fewshots
-
+        # Setup vector store using retrieval system
         self.setup_vectorstore()
-        self.vectorstore = filtered_vectorstore(self.fewshot_strategy if self.fewshot_strategy not in ['rotation', 'task_thought_similarity'] else 'task_similarity', docs=list(self.docs))
 
+        # Build trajectory and queries for current context using retrieval system
         if self.prompt_history == []:
-            queries = {'task': self.step_stripper(self.remove_task_suffix(self.task), step_type='task')}
+            trajectory = None
+            queries = self.retrieval.build_query_vectors(self.task, None, self.prompt_history)
         else:
             history = self.log_history(include_task=False)
-            # used to index
             trajectory = Trajectory(
                 task=self.remove_task_suffix(self.task),
                 trajectory=history,
@@ -586,79 +483,72 @@ class ExpelAgent(ReflectAgent):
                 identifier=self.identifier,
                 step_splitter=self.message_step_splitter,
             )
-            steps = self.message_splitter(trajectory.steps[-1])
-            step_types = [self.identifier(step) for step in steps]
-            if 'observation' not in step_types and self.fewshot_strategy == 'step': # if the step is not complete, use the previous step
-                steps = self.message_splitter(trajectory.steps[-2])
-                step_types = [self.identifier(step) for step in steps]
-            cleaned_step = '\n'.join([self.step_stripper(step, step_type) for step, step_type in zip(steps, step_types)])
-            queries = {
-                'task': self.step_stripper(self.remove_task_suffix(self.task), step_type='task'),
-                'thought': '' if len(trajectory.thoughts) < 1 or trajectory.thoughts[0] == '' else self.step_stripper(trajectory.thoughts[-1], step_type='thought'),
-                'step': cleaned_step,
-                'action': self.step_stripper(trajectory.actions[-1], step_type='action') if len(trajectory.actions) > 1 else '',
-            }
+            queries = self.retrieval.build_query_vectors(self.task, trajectory, self.prompt_history)
 
+        # Select retrieval strategy and get fewshots using retrieval system
         if self.fewshot_strategy == 'random':
-            self.vectorstore = filtered_vectorstore('random', docs=list(self.docs))
-            self.fewshots = topk_docs(queries=queries, query_type='task')
+            self.vectorstore = self.retrieval.create_filtered_vectorstore('random', self.env.env_name)
+            self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'task', self.task)
         elif self.fewshot_strategy == 'rotation':
-            last_step_type = self.identifier(self.message_splitter(trajectory.trajectory)[-1])
-            # use task to retrieve
-            if self.prompt_history == [] or len(trajectory.thoughts) < 1 or trajectory.thoughts[0] == '':
-                self.vectorstore = filtered_vectorstore('task_similarity', docs=list(self.docs))
-                self.fewshots = topk_docs(queries=queries, query_type='task')
+            # Use task to retrieve if no trajectory available
+            if trajectory is None or self.prompt_history == [] or len(trajectory.thoughts) < 1 or trajectory.thoughts[0] == '':
+                self.vectorstore = self.retrieval.create_filtered_vectorstore('task_similarity', self.env.env_name)
+                self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'task', self.task)
             else:
+                last_step_type = self.identifier(self.message_splitter(trajectory.trajectory)[-1])
                 if last_step_type == 'thought':
-                    self.vectorstore = filtered_vectorstore('thought_similarity', docs=list(self.docs))
-                    self.fewshots = topk_docs(queries=queries, query_type='thought')
+                    self.vectorstore = self.retrieval.create_filtered_vectorstore('thought_similarity', self.env.env_name)
+                    self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'thought', self.task)
                 elif last_step_type == 'observation':
-                    self.vectorstore = filtered_vectorstore('step_similarity', docs=list(self.docs))
-                    self.fewshots = topk_docs(queries=queries, query_type='step')
+                    self.vectorstore = self.retrieval.create_filtered_vectorstore('step_similarity', self.env.env_name)
+                    self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'step', self.task)
         elif self.fewshot_strategy == 'task_thought_similarity':
-            # use task to retrieve
-            if self.prompt_history == [] or len(trajectory.thoughts) < 1 or trajectory.thoughts[0] == '':
-                self.vectorstore = filtered_vectorstore('task_similarity', docs=list(self.docs))
-                self.fewshots = topk_docs(queries=queries, query_type='task')
+            # Use task to retrieve
+            if trajectory is None or self.prompt_history == [] or len(trajectory.thoughts) < 1 or trajectory.thoughts[0] == '':
+                self.vectorstore = self.retrieval.create_filtered_vectorstore('task_similarity', self.env.env_name)
+                self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'task', self.task)
             else:
-                self.vectorstore = filtered_vectorstore('thought_similarity', docs=list(self.docs))
-                self.fewshots = topk_docs(queries=queries, query_type='thought')
+                self.vectorstore = self.retrieval.create_filtered_vectorstore('thought_similarity', self.env.env_name)
+                self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'thought', self.task)
         elif self.fewshot_strategy == 'task_similarity':
-            # retrieve task as the query, and task as the keys for successful trials
-            self.vectorstore = filtered_vectorstore('task_similarity', docs=list(self.docs))
-            self.fewshots = topk_docs(queries=queries, query_type='task')
-        # both thought and reflection retrieve based on the latest thought
+            # Retrieve task as the query, and task as the keys for successful trials
+            self.vectorstore = self.retrieval.create_filtered_vectorstore('task_similarity', self.env.env_name)
+            self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'task', self.task)
         elif self.fewshot_strategy == 'thought_similarity':
-            if self.prompt_history == [] or len(trajectory.thoughts) < 1 or trajectory.thoughts[0] == '':
+            if trajectory is None or self.prompt_history == [] or len(trajectory.thoughts) < 1 or trajectory.thoughts[0] == '':
                 ReactAgent.update_dynamic_prompt_components(self)
             else:
-                # use the latest thoughts to retrieve fewshots
-                self.vectorstore = filtered_vectorstore('thought_similarity', docs=list(self.docs))
-                self.fewshots = topk_docs(queries=queries, query_type='thought')
+                # Use the latest thoughts to retrieve fewshots
+                self.vectorstore = self.retrieval.create_filtered_vectorstore('thought_similarity', self.env.env_name)
+                self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'thought', self.task)
         elif self.fewshot_strategy == 'action_similarity':
-            if self.prompt_history == [] or len(trajectory.actions) < 1:
+            if trajectory is None or self.prompt_history == [] or len(trajectory.actions) < 1:
                 ReactAgent.update_dynamic_prompt_components(self)
             else:
-                # use the latest thoughts to retrieve fewshots
-                self.vectorstore = filtered_vectorstore('action_similarity', docs=list(self.docs))
-                self.fewshots = topk_docs(queries=queries, query_type='action')
+                # Use the latest actions to retrieve fewshots
+                self.vectorstore = self.retrieval.create_filtered_vectorstore('action_similarity', self.env.env_name)
+                self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'action', self.task)
         elif self.fewshot_strategy == 'step_similarity':
-            if self.prompt_history == [] or len(trajectory.observations) < 1:
+            if trajectory is None or self.prompt_history == [] or len(trajectory.observations) < 1:
                 ReactAgent.update_dynamic_prompt_components(self)
             else:
-                self.vectorstore = filtered_vectorstore('step_similarity', docs=list(self.docs))
-                self.fewshots = topk_docs(queries=queries, query_type='step')
+                self.vectorstore = self.retrieval.create_filtered_vectorstore('step_similarity', self.env.env_name)
+                self.fewshots = self.retrieval.retrieve_topk_documents(queries, 'step', self.task)
         else:
             raise NotImplementedError
-        # storing the new fewshots and replacing the current ones from prompt_history
+
+        # Update prompt history with new fewshots
         new_fewshots = '\n\n'.join(self.fewshots)
         replaced = False
         for i, history_message in enumerate(self.prompt_history):
             if old_fewshots in history_message.content:
                 message_type = type(history_message)
-                self.prompt_history[i] = message_type(content=history_message.content.replace(old_fewshots, new_fewshots))
+                self.prompt_history[i] = message_type(
+                    content=history_message.content.replace(old_fewshots, new_fewshots)
+                )
                 replaced = True
                 break
+
         if not replaced and self.testing:
             self.prompt_history.append(HumanMessage(content="WARNING. Fewshots haven't been replaced."))
 
