@@ -216,6 +216,15 @@ class ReactAgent(BaseAgent):
         return self.prompt_history
 
     def reset(self, *args, **kwargs) -> None:
+        # Reset conversation through constructor if it exists
+        if hasattr(self, 'constructor') and self.constructor is not None:
+            self.constructor.reset_conversation()
+
+        self.prompt_history = []
+
+        # Update dynamic components first to set system_instruction
+        self.update_dynamic_prompt_components(reset=True)
+
         # Initialize constructor after system_instruction is set
         if self.constructor is None:
             self.constructor = ExpelConstructor(
@@ -227,11 +236,6 @@ class ReactAgent(BaseAgent):
                 human_instruction_kwargs=self.human_instruction_kwargs
             )
 
-        # Reset conversation through constructor
-        self.constructor.reset_conversation()
-        self.prompt_history = []
-
-        self.update_dynamic_prompt_components(reset=True)
         self.curr_step = 1
         self._build_agent_prompt()
 
