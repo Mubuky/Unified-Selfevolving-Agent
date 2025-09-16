@@ -33,10 +33,17 @@ class AlfworldEnv(BaseEnv):
 
     def step(self, action: str) -> Tuple[str, bool, bool, bool, int]:
         if action.startswith('put'):
-            pattern = r'put (\w+\s*\d+) (?:in|on) (\w+\s*\d+)'
+            # Convert old "put X in/on Y" syntax to new "move X to Y" syntax
+            pattern = r'put (\w+\s*\d+) in/on (\w+\s*\d+)'
             match = re.match(pattern, action)
             if match is not None:
-                action = 'put ' + match.group(1) + ' in/on ' + match.group(2)
+                action = 'move ' + match.group(1) + ' to ' + match.group(2)
+            else:
+                # Also handle separate "in" or "on" syntax
+                pattern = r'put (\w+\s*\d+) (?:in|on) (\w+\s*\d+)'
+                match = re.match(pattern, action)
+                if match is not None:
+                    action = 'move ' + match.group(1) + ' to ' + match.group(2)
         
         observation, reward, _ = self.alfworld_run(action)
         observation = observation.replace(' In it, you see nothing.', '').replace(', you see nothing', '')
