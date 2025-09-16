@@ -75,7 +75,7 @@ class ReflectAgent(ReactAgent):
             self.prompt_history.append(HumanMessage(content=self.formatted_reflection))
 
     def prompt_reflection(self) -> str:
-        self.reflection_prompt_history = self.collapse_prompts(self.reflection_prompt_history)
+        self.reflection_prompt_history = self.constructor.collapse_prompts(self.reflection_prompt_history)
         if self.benchmark_name == 'webshop':
             # match the last "Observation:"
             pattern = r"\nObservation: (.*[\n]+)+Next plan:.*"

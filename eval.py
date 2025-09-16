@@ -151,8 +151,8 @@ def main(cfg : DictConfig) -> None:
     # Create rules using training data (if not disabled)
     if not cfg.no_rules:
         training_ids = list(range(num_training_tasks))
-        react_agent.create_rules(
-            training_ids,
+        react_agent.manager.create_rules(
+            training_ids=training_ids,
             cache_fold=None,
             load_cache_fold=0 if cfg.load_cache_rules else None,
         )

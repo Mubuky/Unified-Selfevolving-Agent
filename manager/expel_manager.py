@@ -198,7 +198,7 @@ class ExpelManager(BaseManager):
         """
         Generate critiques by prompting the LLM with success/failure trajectories.
         """
-        critique_history = self.agent.collapse_prompts(
+        critique_history = self.agent.constructor.collapse_prompts(
             self.build_critique_prompt(success_history, fail_history, existing_rules, task if task is None else self.agent.remove_task_suffix(task), reflections)
         )
         print("\n###################################\n")

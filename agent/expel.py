@@ -213,30 +213,6 @@ class ExpelAgent(ReflectAgent):
             return ret
         raise NotImplementedError
 
-    def create_rules(
-        self,
-        training_ids: List[int],
-        cache_fold: int = None,
-        load_cache_fold: int = None,
-        logging_dir: str = None,
-        run_name: str = 'run',
-        loaded_dict: Dict[str, Any] = None,
-        loaded_log: str = None,
-        eval_idx_list: List[int] = None,
-        saving_dict: bool = False,
-    ) -> str:
-        """Delegate insights extraction to the manager."""
-        return self.manager.create_rules(
-            training_ids=training_ids,
-            cache_fold=cache_fold,
-            load_cache_fold=load_cache_fold,
-            logging_dir=logging_dir,
-            run_name=run_name,
-            loaded_dict=loaded_dict,
-            loaded_log=loaded_log,
-            eval_idx_list=eval_idx_list,
-            saving_dict=saving_dict,
-        )
 
     def insert_before_task_prompt(self):
         # if training then reflect
@@ -249,16 +225,6 @@ class ExpelAgent(ReflectAgent):
     def after_step(self) -> None:
         pass
 
-    def setup_vectorstore(self) -> None:
-        """
-        Setup vector store using the modularized retrieval system.
-        """
-        # Use retrieval system to setup documents
-        self.retrieval.setup_documents(
-            succeeded_trial_history=self.succeeded_trial_history,
-            all_fewshots=self.all_fewshots,
-            env=self.env
-        )
 
     def update_dynamic_prompt_components(self, reset: bool = False):
         """
@@ -275,7 +241,11 @@ class ExpelAgent(ReflectAgent):
         old_fewshots = '\n\n'.join(self.fewshots)
 
         # Setup vector store using retrieval system
-        self.setup_vectorstore()
+        self.retrieval.setup_documents(
+            succeeded_trial_history=self.succeeded_trial_history,
+            all_fewshots=self.all_fewshots,
+            env=self.env
+        )
 
         # Build trajectory and queries for current context using retrieval system
         if self.prompt_history == []:

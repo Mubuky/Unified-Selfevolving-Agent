@@ -157,8 +157,7 @@ class ReactAgent(BaseAgent):
         self.curr_step += 1
 
     def prompt_agent(self) -> str:
-        # Use constructor's complete prompting workflow
-        response = self.constructor.prompt_agent_for_llm(
+        return self.constructor.prompt_agent_for_llm(
             llm_callable=self.llm,
             long_context_llm_callable=self.long_context_llm,
             update_callback=self.update_dynamic_prompt_components,
@@ -167,11 +166,6 @@ class ReactAgent(BaseAgent):
             token_counter=self.token_counter,
             long_pass=getattr(self, 'long_pass', None)
         )
-
-        # Update prompt_history reference for compatibility
-        self.prompt_history = self.constructor.get_prompt_history_for_compatibility()
-
-        return response
 
     def _build_fewshot_prompt(
         self,
@@ -191,7 +185,6 @@ class ReactAgent(BaseAgent):
             )
 
     def _build_agent_prompt(self) -> None:
-        # Store build parameters for dynamic updates
         build_params = {
             'fewshots': self.fewshots,
             'task': self.task,
@@ -203,17 +196,11 @@ class ReactAgent(BaseAgent):
         if hasattr(self, 'rules'):
             build_params['rules'] = getattr(self, 'rules', None)
 
-        self.constructor.store_build_parameters(**build_params)
-
         # Use constructor to initialize conversation with complete prompt
         self.constructor.initialize_conversation(**build_params)
 
-        # For compatibility, maintain prompt_history as reference to constructor's conversation
+        # Maintain prompt_history reference for compatibility
         self.prompt_history = self.constructor.conversation_history
-        self.log_idx = self.constructor.base_prompt_length
-
-        self.pretask_idx = len(self.prompt_history)
-        return self.prompt_history
 
     def reset(self, *args, **kwargs) -> None:
         # Reset conversation through constructor if it exists
@@ -268,30 +255,6 @@ class ReactAgent(BaseAgent):
     def get_stats(self) -> Tuple[int, int, int]:
         return self.success, self.fail, self.halted
 
-    def collapse_prompts(self, prompt_history: List[ChatMessage]) -> List[ChatMessage]:
-        """Use constructor's collapse_prompts method"""
-        if self.constructor:
-            return self.constructor.collapse_prompts(prompt_history)
-        else:
-            # Fallback for initialization phase
-            if not prompt_history:
-                return []
-
-            new_prompt_history = []
-            scratch_pad = prompt_history[0].content
-            last_message_type = type(prompt_history[0])
-
-            for message in prompt_history[1:]:
-                current_message_type = type(message)
-                if current_message_type == last_message_type:
-                    scratch_pad += '\n' + message.content
-                else:
-                    new_prompt_history.append(last_message_type(content=scratch_pad))
-                    scratch_pad = message.content
-                    last_message_type = current_message_type
-
-            new_prompt_history.append(last_message_type(content=scratch_pad))
-            return new_prompt_history
 
     def update_dynamic_prompt_components(self, reset: bool = False):
         #####################

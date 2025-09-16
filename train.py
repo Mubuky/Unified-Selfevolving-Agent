@@ -240,8 +240,8 @@ def run_training_phase_2(cfg: DictConfig) -> None:
         print("No cross-validation: using all data for training")
         training_ids = set(range(num_training_tasks))
         log += '################## NO CROSS-VALIDATION - FULL DATA TRAINING ##################\n'
-        log += react_agent.create_rules(
-            list(training_ids),
+        log += react_agent.manager.create_rules(
+            training_ids=list(training_ids),
             cache_fold=None,
             logging_dir=str(SAVE_PATH),
             run_name=cfg.run_name,
@@ -263,8 +263,8 @@ def run_training_phase_2(cfg: DictConfig) -> None:
             training_ids = set(range(num_training_tasks)) - set(eval_idxs)
             (SAVE_PATH / f"fold_{k}").mkdir(exist_ok=True)
             log += f'################## FOLD {k} ##################\n'
-            log += react_agent.create_rules(
-                list(training_ids),
+            log += react_agent.manager.create_rules(
+                training_ids=list(training_ids),
                 cache_fold=k,
                 logging_dir=str(SAVE_PATH / f"fold_{k}"),
                 run_name=cfg.run_name,
