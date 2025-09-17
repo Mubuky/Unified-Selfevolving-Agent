@@ -30,7 +30,7 @@ TASK_ENV_NAMES = [
     ('look', 'look_at_obj'),
     ('examine', 'look_at_obj'),
     ('two', 'pick_two_obj'),
-    ('put', 'pick_and_place') # last one must be at last position
+    ('move', 'pick_and_place') # last one must be at last position
 ]
 
 class Count:
