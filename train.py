@@ -125,37 +125,35 @@ You are using the following language model: {react_agent.llm.model_name}
             log += prefix + react_agent.log_history() + '\n\n'
             true_log += prefix + react_agent.log_history(include_all=True) + '\n\n'
 
-            # next task - only update progress bar if we actually moved to next task
+            # Check if task should continue or move to next
             if cfg.agent_type in ['reflection', 'expel']:
-                # For reflection-based agents, only update progress when truly moving to next task
+                # For reflection-based agents, check if task is truly completed
                 task_incremented = react_agent.next_task()
                 if task_incremented:
-                    progress_bar.update(1)
-                    print(f"Task {expected_task_idx} completed")
                     break  # Exit inner loop when task is completed
             else:
-                # For basic react agent, always update progress (no reflection mechanism)
+                # For basic react agent, always move to next task (no reflection mechanism)
                 react_agent.next_task()
-                progress_bar.update(1)
-                print(f"Task {expected_task_idx} completed")
                 break  # Exit inner loop after single step for basic agents
 
             # Note: Checkpoint saving moved to task level (after for loop iteration)
 
+        # Task completed - update progress bar and save checkpoint
+        progress_bar.update(1)
+        print(f"Task {expected_task_idx} completed")
+
         # Task-level checkpoint: Save state after each completed task
-        if react_agent.task_idx > expected_task_idx or not react_agent.job_not_done():
-            # Task completed - save the final state
-            task_completion_state = {k: deepcopy(v) for k, v in react_agent.__dict__.items() if type(v) in [list, set, str, bool, int, dict, Count] and k not in ['openai_api_key', 'llm']}
-            dicts.append(task_completion_state)
+        task_completion_state = {k: deepcopy(v) for k, v in react_agent.__dict__.items() if type(v) in [list, set, str, bool, int, dict, Count] and k not in ['openai_api_key', 'llm']}
+        dicts.append(task_completion_state)
 
-            storage.save_experience(
-                run_name=cfg.run_name,
-                agent_dict=task_completion_state,
-                log=log,
-                true_log=true_log
-            )
+        storage.save_experience(
+            run_name=cfg.run_name,
+            agent_dict=task_completion_state,
+            log=log,
+            true_log=true_log
+        )
 
-            print(f"Task {expected_task_idx} checkpoint saved (task_idx: {react_agent.task_idx})")
+        print(f"Task {expected_task_idx} checkpoint saved (task_idx: {react_agent.task_idx})")
 
         # Check if all tasks are completed
         if not react_agent.job_not_done():
