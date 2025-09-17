@@ -99,45 +99,67 @@ You are using the following language model: {react_agent.llm.model_name}
         unit="task"
     )
 
-    while react_agent.job_not_done():
-        prefix = f"#######################################\nTASK {react_agent.task_idx}"
-        if cfg.agent_type in ['reflection', 'expel']:
-            prefix += f' Reflection {react_agent.reflection_counter.count}\n\n'
-        else:
-            prefix += '\n\n'
+    # Determine starting task index
+    start_task_idx = react_agent.task_idx
 
-        print(prefix + react_agent.remove_task_suffix(react_agent.task)) # remove_task_suffix used for alfworld
+    # Outer loop: Task-level iteration
+    for expected_task_idx in range(start_task_idx, len(react_agent.tasks)):
+        print(f"Starting Task {expected_task_idx}")
 
-        react_agent.run(mode='train')
+        # Inner loop: Reflection step-level iteration (preserves original logic)
+        while react_agent.job_not_done() and react_agent.task_idx == expected_task_idx:
+            prefix = f"#######################################\nTASK {react_agent.task_idx}"
+            if cfg.agent_type in ['reflection', 'expel']:
+                prefix += f' Reflection {react_agent.reflection_counter.count}\n\n'
+            else:
+                prefix += '\n\n'
 
-        #############################################
-        ### Update & Save trajectory logs + dicts ###
-        #############################################
-        react_agent.update_stats()
-        log += prefix + react_agent.log_history() + '\n\n'
-        true_log += prefix + react_agent.log_history(include_all=True) + '\n\n'
+            print(prefix + react_agent.remove_task_suffix(react_agent.task)) # remove_task_suffix used for alfworld
 
-        # next task - only update progress bar if we actually moved to next task
-        if cfg.agent_type in ['reflection', 'expel']:
-            # For reflection-based agents, only update progress when truly moving to next task
-            task_incremented = react_agent.next_task()
-            if task_incremented:
+            react_agent.run(mode='train')
+
+            #############################################
+            ### Update & Save trajectory logs + dicts ###
+            #############################################
+            react_agent.update_stats()
+            log += prefix + react_agent.log_history() + '\n\n'
+            true_log += prefix + react_agent.log_history(include_all=True) + '\n\n'
+
+            # next task - only update progress bar if we actually moved to next task
+            if cfg.agent_type in ['reflection', 'expel']:
+                # For reflection-based agents, only update progress when truly moving to next task
+                task_incremented = react_agent.next_task()
+                if task_incremented:
+                    progress_bar.update(1)
+                    print(f"Task {expected_task_idx} completed")
+                    break  # Exit inner loop when task is completed
+            else:
+                # For basic react agent, always update progress (no reflection mechanism)
+                react_agent.next_task()
                 progress_bar.update(1)
-        else:
-            # For basic react agent, always update progress (no reflection mechanism)
-            react_agent.next_task()
-            progress_bar.update(1)
+                print(f"Task {expected_task_idx} completed")
+                break  # Exit inner loop after single step for basic agents
 
-        dicts.append({k: deepcopy(v) for k, v in react_agent.__dict__.items() if type(v) in [list, set, str, bool, int, dict, Count] and k not in ['openai_api_key', 'llm']}) # not saving complicated objects
+            # Note: Checkpoint saving moved to task level (after for loop iteration)
 
-        # Save experience checkpoint using storage system
-        storage.save_experience(
-            run_name=cfg.run_name,
-            agent_dict=dicts[-1],  # Save the latest agent state
-            log=log,
-            true_log=true_log
-        )
-        #############################################
+        # Task-level checkpoint: Save state after each completed task
+        if react_agent.task_idx > expected_task_idx or not react_agent.job_not_done():
+            # Task completed - save the final state
+            task_completion_state = {k: deepcopy(v) for k, v in react_agent.__dict__.items() if type(v) in [list, set, str, bool, int, dict, Count] and k not in ['openai_api_key', 'llm']}
+            dicts.append(task_completion_state)
+
+            storage.save_experience(
+                run_name=cfg.run_name,
+                agent_dict=task_completion_state,
+                log=log,
+                true_log=true_log
+            )
+
+            print(f"Task {expected_task_idx} checkpoint saved (task_idx: {react_agent.task_idx})")
+
+        # Check if all tasks are completed
+        if not react_agent.job_not_done():
+            break
 
     progress_bar.close()
 
