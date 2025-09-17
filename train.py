@@ -138,8 +138,7 @@ You are using the following language model: {react_agent.llm.model_name}
 
             # Note: Checkpoint saving moved to task level (after for loop iteration)
 
-        # Task completed - update progress bar and save checkpoint
-        progress_bar.update(1)
+        # Task completed - save checkpoint first
         print(f"Task {expected_task_idx} completed")
 
         # Task-level checkpoint: Save state after each completed task
@@ -155,9 +154,14 @@ You are using the following language model: {react_agent.llm.model_name}
 
         print(f"Task {expected_task_idx} checkpoint saved (task_idx: {react_agent.task_idx})")
 
-        # Check if all tasks are completed
+        # Check if all tasks are completed before updating progress
         if not react_agent.job_not_done():
+            # Update progress for the final task before breaking
+            progress_bar.update(1)
             break
+
+        # Update progress bar only after successful checkpoint save
+        progress_bar.update(1)
 
     progress_bar.close()
 
